@@ -21,6 +21,9 @@ go-backend/api
 .env.*
 !.env.example
 
+# node.js
+node_modules/
+
 # editor / os
 .DS_Store
 .vscode/

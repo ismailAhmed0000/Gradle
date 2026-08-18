@@ -1,0 +1,6 @@
+ios/
+android/
+node_modules/
+coverage/
+tsconfig.json
+nativewind-env.d.ts
