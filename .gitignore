@@ -11,8 +11,10 @@ __pycache__/
 
 # go
 go-backend/bin/
+go-backend/api
 *.exe
 *.test
+*.out
 
 # env / secrets
 .env

@@ -7,7 +7,7 @@ from worker.compositing.pdf import append_answer_page, insert_ink_at_region
 
 def _ink_png(width=300, height=100) -> bytes:
     rgba = np.zeros((height, width, 4), dtype=np.uint8)
-    rgba[20:40, 20:200, 3] = 255  # a solid ink stroke, fully opaque
+    rgba[20:40, 20:200, 3] = 255
     ok, encoded = cv2.imencode(".png", rgba)
     assert ok
     return encoded.tobytes()
