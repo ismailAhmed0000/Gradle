@@ -9,7 +9,9 @@ import (
 	"gradle-go-backend/internal/config"
 	"gradle-go-backend/internal/db"
 	"gradle-go-backend/internal/handlers"
+	"gradle-go-backend/internal/queue"
 	"gradle-go-backend/internal/router"
+	"gradle-go-backend/internal/storage"
 )
 
 func main() {
@@ -24,12 +26,27 @@ func main() {
 	}
 	defer pool.Close()
 
+	s3, err := storage.NewS3Storage(cfg.S3EndpointURL, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3Region)
+	if err != nil {
+		log.Fatalf("storage: %v", err)
+	}
+
+	jobQueue, err := queue.NewJobQueue(cfg.RedisURL)
+	if err != nil {
+		log.Fatalf("queue: %v", err)
+	}
+
 	app := fiber.New(fiber.Config{
 		ErrorHandler: jsonErrorHandler,
 	})
 
-	authHandler := handlers.NewAuthHandler(pool, cfg)
-	router.Setup(app, authHandler, cfg)
+	h := &router.Handlers{
+		Auth:        handlers.NewAuthHandler(pool, cfg),
+		Assignments: handlers.NewAssignmentHandler(pool),
+		Submissions: handlers.NewSubmissionHandler(pool, s3, jobQueue),
+		Internal:    handlers.NewInternalHandler(pool, jobQueue),
+	}
+	router.Setup(app, h, cfg)
 
 	log.Printf("listening on :%s", cfg.Port)
 	if err := app.Listen(":" + cfg.Port); err != nil {
