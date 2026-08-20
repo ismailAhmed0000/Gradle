@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -11,14 +12,18 @@ import (
 
 	"gradle-go-backend/internal/middleware"
 	"gradle-go-backend/internal/models"
+	"gradle-go-backend/internal/storage"
 )
 
+const assignmentFileURLExpiry = 15 * time.Minute
+
 type AssignmentHandler struct {
-	DB *pgxpool.Pool
+	DB      *pgxpool.Pool
+	Storage *storage.S3Storage
 }
 
-func NewAssignmentHandler(db *pgxpool.Pool) *AssignmentHandler {
-	return &AssignmentHandler{DB: db}
+func NewAssignmentHandler(db *pgxpool.Pool, s *storage.S3Storage) *AssignmentHandler {
+	return &AssignmentHandler{DB: db, Storage: s}
 }
 
 func (h *AssignmentHandler) List(c *fiber.Ctx) error {
@@ -131,5 +136,17 @@ func (h *AssignmentHandler) listAssignmentFiles(ctx context.Context, assignmentI
 		}
 		files = append(files, f)
 	}
-	return files, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for i := range files {
+		url, err := h.Storage.PresignedGetURL(ctx, files[i].FilePath, assignmentFileURLExpiry)
+		if err != nil {
+			return nil, err
+		}
+		files[i].DownloadURL = url
+	}
+
+	return files, nil
 }

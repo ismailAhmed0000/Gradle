@@ -15,6 +15,7 @@ type Config struct {
 	JWTExpiryHours   int
 	RedisURL         string
 	S3EndpointURL    string
+	S3PublicURL      string
 	S3AccessKey      string
 	S3SecretKey      string
 	S3Bucket         string
@@ -37,6 +38,7 @@ func Load() (*Config, error) {
 		JWTExpiryHours:   expiryHours,
 		RedisURL:         getEnv("REDIS_URL", "redis://localhost:6379/0"),
 		S3EndpointURL:    getEnv("S3_ENDPOINT_URL", "http://localhost:9000"),
+		S3PublicURL:      os.Getenv("S3_PUBLIC_URL"),
 		S3AccessKey:      getEnv("S3_ACCESS_KEY", "minioadmin"),
 		S3SecretKey:      getEnv("S3_SECRET_KEY", "minioadmin"),
 		S3Bucket:         getEnv("S3_BUCKET", "gradle-artifacts"),

@@ -1,17 +1,18 @@
 import './global.css';
 
 import { useState } from 'react';
-import { StatusBar, StyleSheet, useColorScheme } from 'react-native';
+import { StatusBar, StyleSheet, useColorScheme, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { NavigationContainer } from '@react-navigation/native';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
+import { AssignmentsProvider } from './src/context/AssignmentsContext';
 import { SplashScreen } from './src/screens/SplashScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { RegisterScreen } from './src/screens/RegisterScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
-import { TasksScreen } from './src/screens/TasksScreen';
 import { BottomNavBar } from './src/components/BottomNavBar';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { View } from 'react-native';
+import { TasksStackNavigator } from './src/navigation/TasksStackNavigator';
 
 function App() {
   const isDarkMode = useColorScheme() === 'dark';
@@ -41,7 +42,11 @@ function AppContent() {
     );
   }
 
-  return <AuthenticatedApp />;
+  return (
+    <AssignmentsProvider>
+      <AuthenticatedApp />
+    </AssignmentsProvider>
+  );
 }
 
 function AuthenticatedApp() {
@@ -50,7 +55,14 @@ function AuthenticatedApp() {
   return (
     <View style={styles.container}>
       <View style={styles.container}>
-        {activeTab === 'home' ? <HomeScreen /> : <TasksScreen />}
+        <View style={activeTab === 'home' ? styles.container : styles.hidden}>
+          <HomeScreen />
+        </View>
+        <View style={activeTab === 'tasks' ? styles.container : styles.hidden}>
+          <NavigationContainer>
+            <TasksStackNavigator />
+          </NavigationContainer>
+        </View>
       </View>
       <BottomNavBar
         activeTab={activeTab}
@@ -62,9 +74,8 @@ function AuthenticatedApp() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1 },
+  hidden: { display: 'none' },
 });
 
 export default App;

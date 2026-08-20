@@ -19,6 +19,7 @@ type AssignmentFile struct {
 	FilePath     string    `json:"file_path"`
 	PageCount    int       `json:"page_count"`
 	CreatedAt    time.Time `json:"created_at"`
+	DownloadURL  string    `json:"download_url,omitempty"`
 }
 
 type Question struct {

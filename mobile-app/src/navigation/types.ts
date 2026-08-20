@@ -6,3 +6,8 @@ export type AuthStackParamList = {
 export type RootStackParamList = {
   Main: undefined;
 };
+
+export type TasksStackParamList = {
+  AssignmentsList: undefined;
+  AssignmentDetail: { assignmentId: string };
+};

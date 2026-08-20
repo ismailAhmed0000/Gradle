@@ -48,7 +48,7 @@ function TasksIcon({ color }: { color: string }) {
   );
 }
 
-function CameraIcon({ color }: { color: string }) {
+export function CameraIcon({ color }: { color: string }) {
   return (
     <Svg width={26} height={26} viewBox="0 0 24 24" fill="none">
       <Path

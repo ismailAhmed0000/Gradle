@@ -26,7 +26,7 @@ func main() {
 	}
 	defer pool.Close()
 
-	s3, err := storage.NewS3Storage(cfg.S3EndpointURL, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3Region)
+	s3, err := storage.NewS3Storage(cfg.S3EndpointURL, cfg.S3PublicURL, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3Region)
 	if err != nil {
 		log.Fatalf("storage: %v", err)
 	}
@@ -42,7 +42,7 @@ func main() {
 
 	h := &router.Handlers{
 		Auth:        handlers.NewAuthHandler(pool, cfg),
-		Assignments: handlers.NewAssignmentHandler(pool),
+		Assignments: handlers.NewAssignmentHandler(pool, s3),
 		Submissions: handlers.NewSubmissionHandler(pool, s3, jobQueue),
 		Internal:    handlers.NewInternalHandler(pool, jobQueue),
 	}
