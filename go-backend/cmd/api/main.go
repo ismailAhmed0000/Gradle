@@ -45,6 +45,7 @@ func main() {
 		Assignments: handlers.NewAssignmentHandler(pool, s3),
 		Submissions: handlers.NewSubmissionHandler(pool, s3, jobQueue),
 		Internal:    handlers.NewInternalHandler(pool, jobQueue),
+		Dashboard:   handlers.NewDashboardHandler(pool),
 	}
 	router.Setup(app, h, cfg)
 

@@ -177,7 +177,7 @@ func (h *SubmissionHandler) recordPageAndAnswerRegions(
 
 	rows, err := tx.Query(
 		ctx,
-		`SELECT id, crop_x, crop_y, crop_width, crop_height FROM questions
+		`SELECT id, region_x, region_y, region_width, region_height FROM questions
 		 WHERE assignment_id = $1 AND has_defined_region = true AND page_number = $2`,
 		assignmentID, pageNumber,
 	)

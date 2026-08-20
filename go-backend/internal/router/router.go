@@ -13,6 +13,7 @@ type Handlers struct {
 	Assignments *handlers.AssignmentHandler
 	Submissions *handlers.SubmissionHandler
 	Internal    *handlers.InternalHandler
+	Dashboard   *handlers.DashboardHandler
 }
 
 func Setup(app *fiber.App, h *Handlers, cfg *config.Config) {
@@ -28,6 +29,8 @@ func Setup(app *fiber.App, h *Handlers, cfg *config.Config) {
 	authGroup.Get("/me", middleware.RequireAuth(cfg.JWTSecret), h.Auth.Me)
 
 	requireAuth := middleware.RequireAuth(cfg.JWTSecret)
+
+	api.Get("/dashboard", requireAuth, h.Dashboard.Summary)
 
 	assignmentsGroup := api.Group("/assignments", requireAuth)
 	assignmentsGroup.Get("/", h.Assignments.List)
