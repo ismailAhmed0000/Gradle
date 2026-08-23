@@ -9,7 +9,8 @@ type DailyActivity struct {
 type DashboardSummary struct {
 	TodayPagesScanned    int             `json:"today_pages_scanned"`
 	WeeklyActivity       []DailyActivity `json:"weekly_activity"`
-	CompositedPercentage float64         `json:"composited_percentage"`
+	SubmittedThisWeek    int             `json:"submitted_this_week"`
+	PendingThisWeek      int             `json:"pending_this_week"`
 	SubmissionsThisWeek  int             `json:"submissions_this_week"`
 	PagesScannedThisWeek int             `json:"pages_scanned_this_week"`
 }

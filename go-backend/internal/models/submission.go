@@ -98,6 +98,13 @@ type CompositedDocumentPage struct {
 	CreatedAt            time.Time          `json:"created_at"`
 }
 
+type SubmissionSummary struct {
+	Submission
+	PageCount          int `json:"page_count"`
+	AnswerRegionsDone  int `json:"answer_regions_done"`
+	AnswerRegionsTotal int `json:"answer_regions_total"`
+}
+
 type SubmissionDetail struct {
 	Submission
 	Pages         []SubmissionPage    `json:"pages"`

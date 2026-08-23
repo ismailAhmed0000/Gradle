@@ -35,6 +35,7 @@ func Setup(app *fiber.App, h *Handlers, cfg *config.Config) {
 	assignmentsGroup := api.Group("/assignments", requireAuth)
 	assignmentsGroup.Get("/", h.Assignments.List)
 	assignmentsGroup.Get("/:id", h.Assignments.GetByID)
+	assignmentsGroup.Get("/:id/submissions", h.Submissions.ListForAssignment)
 	assignmentsGroup.Post("/:id/submissions", h.Submissions.Create)
 
 	submissionsGroup := api.Group("/submissions", requireAuth)

@@ -9,7 +9,8 @@ export type DailyActivity = {
 export type DashboardSummary = {
   today_pages_scanned: number;
   weekly_activity: DailyActivity[];
-  composited_percentage: number;
+  submitted_this_week: number;
+  pending_this_week: number;
   submissions_this_week: number;
   pages_scanned_this_week: number;
 };

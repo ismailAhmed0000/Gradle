@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NavigationContainer } from '@react-navigation/native';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { AssignmentsProvider } from './src/context/AssignmentsContext';
+import { SubmissionsProvider } from './src/context/SubmissionsContext';
 import { SplashScreen } from './src/screens/SplashScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { RegisterScreen } from './src/screens/RegisterScreen';
@@ -44,7 +45,9 @@ function AppContent() {
 
   return (
     <AssignmentsProvider>
-      <AuthenticatedApp />
+      <SubmissionsProvider>
+        <AuthenticatedApp />
+      </SubmissionsProvider>
     </AssignmentsProvider>
   );
 }
@@ -64,11 +67,7 @@ function AuthenticatedApp() {
           </NavigationContainer>
         </View>
       </View>
-      <BottomNavBar
-        activeTab={activeTab}
-        onTabPress={setActiveTab}
-        onCameraPress={() => {}}
-      />
+      <BottomNavBar activeTab={activeTab} onTabPress={setActiveTab} />
     </View>
   );
 }

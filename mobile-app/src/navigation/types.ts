@@ -10,4 +10,5 @@ export type RootStackParamList = {
 export type TasksStackParamList = {
   AssignmentsList: undefined;
   AssignmentDetail: { assignmentId: string };
+  SubmissionDetail: { submissionId: string; studentName: string };
 };

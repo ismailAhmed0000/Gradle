@@ -50,11 +50,6 @@ func (h *DashboardHandler) Summary(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to load submission stats")
 	}
 
-	percentage := 0.0
-	if totalSubmissions > 0 {
-		percentage = float64(composited) / float64(totalSubmissions) * 100
-	}
-
 	pagesThisWeek := 0
 	for _, day := range activity {
 		pagesThisWeek += day.PagesScanned
@@ -63,7 +58,8 @@ func (h *DashboardHandler) Summary(c *fiber.Ctx) error {
 	return c.JSON(models.DashboardSummary{
 		TodayPagesScanned:    todayPages,
 		WeeklyActivity:       activity,
-		CompositedPercentage: percentage,
+		SubmittedThisWeek:    totalSubmissions,
+		PendingThisWeek:      totalSubmissions - composited,
 		SubmissionsThisWeek:  totalSubmissions,
 		PagesScannedThisWeek: pagesThisWeek,
 	})

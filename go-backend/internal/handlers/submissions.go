@@ -1,9 +1,14 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
+	"io"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -78,6 +83,64 @@ func (h *SubmissionHandler) Create(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(s)
 }
 
+func (h *SubmissionHandler) ListForAssignment(c *fiber.Ctx) error {
+	ownerID := c.Locals(middleware.LocalsUserID)
+
+	assignmentID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid assignment id")
+	}
+
+	var exists bool
+	err = h.DB.QueryRow(
+		c.Context(),
+		`SELECT EXISTS(SELECT 1 FROM assignments WHERE id = $1 AND owner_id = $2)`,
+		assignmentID, ownerID,
+	).Scan(&exists)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up assignment")
+	}
+	if !exists {
+		return fiber.NewError(fiber.StatusNotFound, "assignment not found")
+	}
+
+	rows, err := h.DB.Query(
+		c.Context(),
+		`SELECT s.id, s.assignment_id, s.student_name, s.status, s.created_at,
+		        COUNT(DISTINCT sp.id) AS page_count,
+		        COUNT(ar.id) FILTER (WHERE ar.status = 'done') AS regions_done,
+		        COUNT(ar.id) AS regions_total
+		 FROM submissions s
+		 LEFT JOIN submission_pages sp ON sp.submission_id = s.id
+		 LEFT JOIN answer_regions ar ON ar.submission_id = s.id
+		 WHERE s.assignment_id = $1
+		 GROUP BY s.id
+		 ORDER BY s.created_at DESC`,
+		assignmentID,
+	)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to load submissions")
+	}
+	defer rows.Close()
+
+	submissions := []models.SubmissionSummary{}
+	for rows.Next() {
+		var s models.SubmissionSummary
+		if err := rows.Scan(
+			&s.ID, &s.AssignmentID, &s.StudentName, &s.Status, &s.CreatedAt,
+			&s.PageCount, &s.AnswerRegionsDone, &s.AnswerRegionsTotal,
+		); err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "failed to load submissions")
+		}
+		submissions = append(submissions, s)
+	}
+	if err := rows.Err(); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to load submissions")
+	}
+
+	return c.JSON(submissions)
+}
+
 type uploadPageResponse struct {
 	Page                models.SubmissionPage `json:"page"`
 	AnswerRegionsQueued int                   `json:"answer_regions_queued"`
@@ -122,6 +185,16 @@ func (h *SubmissionHandler) UploadPage(c *fiber.Ctx) error {
 	}
 	defer file.Close()
 
+	fileBytes, err := io.ReadAll(file)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "failed to read uploaded file")
+	}
+
+	imgConfig, _, err := image.DecodeConfig(bytes.NewReader(fileBytes))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "uploaded file is not a valid image")
+	}
+
 	ext := filepath.Ext(fileHeader.Filename)
 	if ext == "" {
 		ext = ".jpg"
@@ -132,11 +205,13 @@ func (h *SubmissionHandler) UploadPage(c *fiber.Ctx) error {
 	}
 	key := fmt.Sprintf("submissions/%s/pages/%d%s", submissionID, pageNumber, ext)
 
-	if err := h.Storage.PutObject(c.Context(), key, file, fileHeader.Size, contentType); err != nil {
+	if err := h.Storage.PutObject(c.Context(), key, bytes.NewReader(fileBytes), int64(len(fileBytes)), contentType); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to store scanned page")
 	}
 
-	answerRegionIDs, page, err := h.recordPageAndAnswerRegions(c.Context(), submissionID, assignmentID, pageNumber, key)
+	answerRegionIDs, page, err := h.recordPageAndAnswerRegions(
+		c.Context(), submissionID, assignmentID, pageNumber, key, float64(imgConfig.Width), float64(imgConfig.Height),
+	)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to save scanned page")
 	}
@@ -155,6 +230,7 @@ func (h *SubmissionHandler) UploadPage(c *fiber.Ctx) error {
 
 func (h *SubmissionHandler) recordPageAndAnswerRegions(
 	ctx context.Context, submissionID, assignmentID uuid.UUID, pageNumber int, rawImagePath string,
+	imageWidth, imageHeight float64,
 ) ([]uuid.UUID, models.SubmissionPage, error) {
 	tx, err := h.DB.Begin(ctx)
 	if err != nil {
@@ -206,6 +282,15 @@ func (h *SubmissionHandler) recordPageAndAnswerRegions(
 
 	answerRegionIDs := make([]uuid.UUID, 0, len(seeds))
 	for _, s := range seeds {
+		// question region_x/y/width/height are normalized (0-1) fractions of
+		// the page; convert to absolute pixel coordinates against this
+		// specific scanned image before storing, since that's what the
+		// extraction worker crops with.
+		cropX := s.cropX * imageWidth
+		cropY := s.cropY * imageHeight
+		cropWidth := s.cropWidth * imageWidth
+		cropHeight := s.cropHeight * imageHeight
+
 		var regionID uuid.UUID
 		err = tx.QueryRow(
 			ctx,
@@ -216,7 +301,7 @@ func (h *SubmissionHandler) recordPageAndAnswerRegions(
 			               crop_width = EXCLUDED.crop_width, crop_height = EXCLUDED.crop_height,
 			               status = 'pending', extracted_ink_path = NULL, error_message = NULL
 			 RETURNING id`,
-			submissionID, s.questionID, page.ID, s.cropX, s.cropY, s.cropWidth, s.cropHeight,
+			submissionID, s.questionID, page.ID, cropX, cropY, cropWidth, cropHeight,
 		).Scan(&regionID)
 		if err != nil {
 			return nil, models.SubmissionPage{}, err

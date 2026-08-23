@@ -7,7 +7,6 @@ type Tab = 'tasks' | 'home';
 type Props = {
   activeTab: Tab;
   onTabPress: (tab: Tab) => void;
-  onCameraPress: () => void;
 };
 
 const ACTIVE_COLOR = '#2f6690';
@@ -63,7 +62,7 @@ export function CameraIcon({ color }: { color: string }) {
   );
 }
 
-export function BottomNavBar({ activeTab, onTabPress, onCameraPress }: Props) {
+export function BottomNavBar({ activeTab, onTabPress }: Props) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -80,10 +79,6 @@ export function BottomNavBar({ activeTab, onTabPress, onCameraPress }: Props) {
         >
           Home
         </Text>
-      </Pressable>
-
-      <Pressable onPress={onCameraPress} style={styles.cameraButton}>
-        <CameraIcon color="#ffffff" />
       </Pressable>
 
       <Pressable onPress={() => onTabPress('tasks')} style={styles.tab}>
@@ -121,19 +116,5 @@ const styles = StyleSheet.create({
   label: {
     marginTop: 4,
     fontSize: 12,
-  },
-  cameraButton: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: ACTIVE_COLOR,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: -40,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 6,
   },
 });
