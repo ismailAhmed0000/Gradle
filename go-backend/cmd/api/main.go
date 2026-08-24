@@ -26,7 +26,7 @@ func main() {
 	}
 	defer pool.Close()
 
-	s3, err := storage.NewS3Storage(cfg.S3EndpointURL, cfg.S3PublicURL, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3Region)
+	s3, err := storage.NewS3Storage(cfg.S3EndpointURL, cfg.S3PublicURL, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3Region, cfg.S3VirtualHost)
 	if err != nil {
 		log.Fatalf("storage: %v", err)
 	}

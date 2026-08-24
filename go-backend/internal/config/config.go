@@ -20,6 +20,7 @@ type Config struct {
 	S3SecretKey      string
 	S3Bucket         string
 	S3Region         string
+	S3VirtualHost    bool
 	InternalAPIToken string
 }
 
@@ -43,6 +44,7 @@ func Load() (*Config, error) {
 		S3SecretKey:      getEnv("S3_SECRET_KEY", "minioadmin"),
 		S3Bucket:         getEnv("S3_BUCKET", "gradle-artifacts"),
 		S3Region:         getEnv("S3_REGION", "us-east-1"),
+		S3VirtualHost:    getEnv("S3_VIRTUAL_HOST_STYLE", "false") == "true",
 		InternalAPIToken: os.Getenv("INTERNAL_API_TOKEN"),
 	}
 

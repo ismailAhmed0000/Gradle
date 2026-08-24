@@ -22,8 +22,8 @@ type S3Storage struct {
 // (publicURL) — they can differ, e.g. the backend reaches MinIO via
 // "localhost:9000" while an Android emulator needs "10.0.2.2:9000" for the
 // same server. If publicURL is empty, it falls back to endpointURL.
-func NewS3Storage(endpointURL, publicURL, accessKey, secretKey, bucket, region string) (*S3Storage, error) {
-	client, err := newMinioClient(endpointURL, accessKey, secretKey, region)
+func NewS3Storage(endpointURL, publicURL, accessKey, secretKey, bucket, region string, virtualHost bool) (*S3Storage, error) {
+	client, err := newMinioClient(endpointURL, accessKey, secretKey, region, virtualHost)
 	if err != nil {
 		return nil, fmt.Errorf("creating s3 client: %w", err)
 	}
@@ -31,7 +31,7 @@ func NewS3Storage(endpointURL, publicURL, accessKey, secretKey, bucket, region s
 	if publicURL == "" {
 		publicURL = endpointURL
 	}
-	publicClient, err := newMinioClient(publicURL, accessKey, secretKey, region)
+	publicClient, err := newMinioClient(publicURL, accessKey, secretKey, region, virtualHost)
 	if err != nil {
 		return nil, fmt.Errorf("creating public s3 client: %w", err)
 	}
@@ -39,14 +39,25 @@ func NewS3Storage(endpointURL, publicURL, accessKey, secretKey, bucket, region s
 	return &S3Storage{client: client, publicClient: publicClient, bucket: bucket}, nil
 }
 
-func newMinioClient(endpointURL, accessKey, secretKey, region string) (*minio.Client, error) {
+func newMinioClient(endpointURL, accessKey, secretKey, region string, virtualHost bool) (*minio.Client, error) {
 	secure := strings.HasPrefix(endpointURL, "https://")
 	endpoint := strings.TrimPrefix(strings.TrimPrefix(endpointURL, "https://"), "http://")
 
+	// MinIO's own auto-detection only recognizes a handful of well-known
+	// providers (AWS, DigitalOcean, ...) and falls back to path-style for
+	// anything else — some managed S3-compatible providers (e.g. Railway's
+	// bucket storage) only support virtual-host-style addressing, so that
+	// has to be requested explicitly rather than relying on auto-detection.
+	bucketLookup := minio.BucketLookupAuto
+	if virtualHost {
+		bucketLookup = minio.BucketLookupDNS
+	}
+
 	return minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
-		Secure: secure,
-		Region: region,
+		Creds:        credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure:       secure,
+		Region:       region,
+		BucketLookup: bucketLookup,
 	})
 }
 
