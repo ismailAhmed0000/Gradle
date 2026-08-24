@@ -4,17 +4,26 @@ import {
   FlatList,
   Pressable,
   RefreshControl,
+  StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useAssignments } from '../context/AssignmentsContext';
-import { Assignment } from '../api/assignments';
+import {
+  ASSIGNMENT_STATUS_COLORS,
+  ASSIGNMENT_STATUS_LABELS,
+  Assignment,
+} from '../api/assignments';
 import { TasksStackParamList } from '../navigation/types';
+
+const ACCENT_COLOR = '#2f6690';
 
 type Props = NativeStackScreenProps<TasksStackParamList, 'AssignmentsList'>;
 
 export function AssignmentsListScreen({ navigation }: Props) {
+  const insets = useSafeAreaInsets();
   const { list, listStatus, listError, loadAssignments } = useAssignments();
 
   useEffect(() => {
@@ -27,13 +36,23 @@ export function AssignmentsListScreen({ navigation }: Props) {
         onPress={() =>
           navigation.navigate('AssignmentDetail', { assignmentId: item.id })
         }
-        className="border-b border-gray-100 px-6 py-4"
+        className="mb-3 flex-row items-center justify-between rounded-3xl bg-gray-50 p-5"
       >
-        <Text className="text-base font-semibold text-gray-900">
-          {item.title}
-        </Text>
-        <Text className="mt-1 text-xs text-gray-500">
-          {new Date(item.created_at).toLocaleDateString()}
+        <View className="flex-1 pr-4">
+          <Text className="text-base font-semibold text-gray-900">
+            {item.title}
+          </Text>
+          <Text className="mt-1 text-xs text-gray-500">
+            {item.due_date
+              ? `Due ${new Date(item.due_date).toLocaleDateString()}`
+              : 'No due date'}
+          </Text>
+        </View>
+        <Text
+          className="text-xs font-semibold"
+          style={{ color: ASSIGNMENT_STATUS_COLORS[item.status] }}
+        >
+          {ASSIGNMENT_STATUS_LABELS[item.status]}
         </Text>
       </Pressable>
     ),
@@ -43,7 +62,7 @@ export function AssignmentsListScreen({ navigation }: Props) {
   if (listStatus === 'loading' && list.length === 0) {
     return (
       <View className="flex-1 items-center justify-center bg-white">
-        <ActivityIndicator size="large" color="#2f6690" />
+        <ActivityIndicator size="large" color={ACCENT_COLOR} />
       </View>
     );
   }
@@ -57,22 +76,41 @@ export function AssignmentsListScreen({ navigation }: Props) {
   }
 
   return (
-    <FlatList
-      className="flex-1 bg-white"
-      data={list}
-      keyExtractor={item => item.id}
-      renderItem={renderItem}
-      refreshControl={
-        <RefreshControl
-          refreshing={listStatus === 'loading'}
-          onRefresh={() => loadAssignments(true)}
-        />
-      }
-      ListEmptyComponent={
-        <View className="items-center px-6 py-12">
-          <Text className="text-sm text-gray-500">No assignments yet.</Text>
-        </View>
-      }
-    />
+    <View className="flex-1 bg-white">
+      <View
+        className="px-6 pb-2"
+        style={{ paddingTop: Math.max(insets.top, 16) + 12 }}
+      >
+        <Text className="text-center text-3xl font-bold text-gray-900">
+          Assignments
+        </Text>
+      </View>
+      <FlatList
+        className="flex-1"
+        contentContainerStyle={styles.listContent}
+        data={list}
+        keyExtractor={item => item.id}
+        renderItem={renderItem}
+        refreshControl={
+          <RefreshControl
+            refreshing={listStatus === 'loading'}
+            onRefresh={() => loadAssignments(true)}
+            tintColor={ACCENT_COLOR}
+          />
+        }
+        ListEmptyComponent={
+          <View className="items-center px-6 py-12">
+            <Text className="text-sm text-gray-500">No assignments yet.</Text>
+          </View>
+        }
+      />
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  listContent: {
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+  },
+});

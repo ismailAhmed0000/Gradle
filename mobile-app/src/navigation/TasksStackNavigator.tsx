@@ -12,12 +12,12 @@ export function TasksStackNavigator() {
       <Stack.Screen
         name="AssignmentsList"
         component={AssignmentsListScreen}
-        options={{ title: 'Assignments' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="AssignmentDetail"
         component={AssignmentDetailScreen}
-        options={{ title: 'Assignment' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="SubmissionDetail"

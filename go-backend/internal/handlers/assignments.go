@@ -31,8 +31,14 @@ func (h *AssignmentHandler) List(c *fiber.Ctx) error {
 
 	rows, err := h.DB.Query(
 		c.Context(),
-		`SELECT id, owner_id, title, created_at FROM assignments
-		 WHERE owner_id = $1 ORDER BY created_at DESC`,
+		`SELECT a.id, a.owner_id, a.title, a.subject, a.due_date, a.created_at, latest.status
+		 FROM assignments a
+		 LEFT JOIN LATERAL (
+		     SELECT s.status FROM submissions s
+		     WHERE s.assignment_id = a.id
+		     ORDER BY s.created_at DESC LIMIT 1
+		 ) latest ON true
+		 WHERE a.owner_id = $1 ORDER BY a.created_at DESC`,
 		ownerID,
 	)
 	if err != nil {
@@ -43,9 +49,11 @@ func (h *AssignmentHandler) List(c *fiber.Ctx) error {
 	assignments := []models.Assignment{}
 	for rows.Next() {
 		var a models.Assignment
-		if err := rows.Scan(&a.ID, &a.OwnerID, &a.Title, &a.CreatedAt); err != nil {
+		var latestSubmissionStatus *string
+		if err := rows.Scan(&a.ID, &a.OwnerID, &a.Title, &a.Subject, &a.DueDate, &a.CreatedAt, &latestSubmissionStatus); err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "failed to read assignments")
 		}
+		a.Status = computeAssignmentStatus(a.DueDate, latestSubmissionStatus)
 		assignments = append(assignments, a)
 	}
 	if err := rows.Err(); err != nil {
@@ -53,6 +61,22 @@ func (h *AssignmentHandler) List(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(assignments)
+}
+
+// computeAssignmentStatus derives a single status for an assignment from the
+// most recently created submission (a student has exactly one answer paper
+// per assignment) and the assignment's due date.
+func computeAssignmentStatus(dueDate *time.Time, latestSubmissionStatus *string) models.AssignmentStatus {
+	if latestSubmissionStatus != nil {
+		if models.SubmissionStatus(*latestSubmissionStatus) == models.SubmissionStatusComposited {
+			return models.AssignmentStatusGraded
+		}
+		return models.AssignmentStatusSubmitted
+	}
+	if dueDate != nil && dueDate.Before(time.Now()) {
+		return models.AssignmentStatusExpired
+	}
+	return models.AssignmentStatusPending
 }
 
 func (h *AssignmentHandler) GetByID(c *fiber.Ctx) error {
@@ -66,15 +90,31 @@ func (h *AssignmentHandler) GetByID(c *fiber.Ctx) error {
 	var detail models.AssignmentDetail
 	err = h.DB.QueryRow(
 		c.Context(),
-		`SELECT id, owner_id, title, created_at FROM assignments WHERE id = $1 AND owner_id = $2`,
+		`SELECT a.id, a.owner_id, a.title, a.subject, a.due_date, a.created_at, u.email
+		 FROM assignments a JOIN users u ON u.id = a.owner_id
+		 WHERE a.id = $1 AND a.owner_id = $2`,
 		assignmentID, ownerID,
-	).Scan(&detail.ID, &detail.OwnerID, &detail.Title, &detail.CreatedAt)
+	).Scan(
+		&detail.ID, &detail.OwnerID, &detail.Title, &detail.Subject, &detail.DueDate, &detail.CreatedAt,
+		&detail.TeacherEmail,
+	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fiber.NewError(fiber.StatusNotFound, "assignment not found")
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up assignment")
 	}
+
+	var latestSubmissionStatus *string
+	err = h.DB.QueryRow(
+		c.Context(),
+		`SELECT status FROM submissions WHERE assignment_id = $1 ORDER BY created_at DESC LIMIT 1`,
+		assignmentID,
+	).Scan(&latestSubmissionStatus)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up submission status")
+	}
+	detail.Status = computeAssignmentStatus(detail.DueDate, latestSubmissionStatus)
 
 	detail.Questions, err = h.listQuestions(c.Context(), assignmentID)
 	if err != nil {

@@ -51,11 +51,16 @@ export async function fetchCompositedDocument(
   return response.data;
 }
 
+export type CreatedSubmission = Submission & { page_count: number };
+
+// A student has exactly one answer sheet per assignment: submitting the same
+// name again resumes their existing submission (with its existing pages)
+// rather than starting a new one.
 export async function createSubmission(
   assignmentId: string,
   studentName: string,
-): Promise<Submission> {
-  const response = await apiClient.post<Submission>(
+): Promise<CreatedSubmission> {
+  const response = await apiClient.post<CreatedSubmission>(
     `/api/assignments/${assignmentId}/submissions`,
     { student_name: studentName },
   );

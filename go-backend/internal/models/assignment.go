@@ -6,11 +6,23 @@ import (
 	"github.com/google/uuid"
 )
 
+type AssignmentStatus string
+
+const (
+	AssignmentStatusPending   AssignmentStatus = "pending"
+	AssignmentStatusExpired   AssignmentStatus = "expired"
+	AssignmentStatusSubmitted AssignmentStatus = "submitted"
+	AssignmentStatusGraded    AssignmentStatus = "graded"
+)
+
 type Assignment struct {
-	ID        uuid.UUID `json:"id"`
-	OwnerID   uuid.UUID `json:"owner_id"`
-	Title     string    `json:"title"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        uuid.UUID        `json:"id"`
+	OwnerID   uuid.UUID        `json:"owner_id"`
+	Title     string           `json:"title"`
+	Subject   *string          `json:"subject,omitempty"`
+	DueDate   *time.Time       `json:"due_date,omitempty"`
+	Status    AssignmentStatus `json:"status"`
+	CreatedAt time.Time        `json:"created_at"`
 }
 
 type AssignmentFile struct {
@@ -38,6 +50,7 @@ type Question struct {
 
 type AssignmentDetail struct {
 	Assignment
+	TeacherEmail    string           `json:"teacher_email"`
 	Questions       []Question       `json:"questions"`
 	AssignmentFiles []AssignmentFile `json:"assignment_files"`
 }

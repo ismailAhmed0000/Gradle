@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Pdf from 'react-native-pdf';
@@ -19,6 +19,11 @@ export function SubmissionDetailScreen({ route }: Props) {
 
   const [pdfDataUri, setPdfDataUri] = useState<string | null>(null);
   const [downloadFailed, setDownloadFailed] = useState(false);
+  // download_url is a presigned S3 link that expires after ~15 minutes;
+  // polling stops once the document is done, so a screen left open past
+  // that window would hold a dead URL. Retry once by polling again (which
+  // mints a fresh URL) before surfacing an error.
+  const pdfRetriedRef = useRef(false);
 
   useEffect(() => {
     startPollingComposited(submissionId);
@@ -30,17 +35,26 @@ export function SubmissionDetailScreen({ route }: Props) {
       return;
     }
     let cancelled = false;
+    setDownloadFailed(false);
     fetchPdfAsDataUri(result.download_url)
       .then(dataUri => {
         if (!cancelled) setPdfDataUri(dataUri);
       })
       .catch(() => {
-        if (!cancelled) setDownloadFailed(true);
+        if (cancelled) {
+          return;
+        }
+        if (!pdfRetriedRef.current) {
+          pdfRetriedRef.current = true;
+          startPollingComposited(submissionId);
+        } else {
+          setDownloadFailed(true);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [result?.status, result?.download_url]);
+  }, [result?.status, result?.download_url, submissionId, startPollingComposited]);
 
   const pdfSource = useMemo(
     () => (pdfDataUri ? { uri: pdfDataUri } : null),

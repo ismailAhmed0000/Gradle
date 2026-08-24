@@ -69,10 +69,13 @@ func (h *SubmissionHandler) Create(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "assignment not found")
 	}
 
+	// A student has exactly one answer sheet per assignment: re-submitting the
+	// same name resumes their existing submission instead of creating another.
 	var s models.Submission
 	err = h.DB.QueryRow(
 		c.Context(),
 		`INSERT INTO submissions (assignment_id, student_name) VALUES ($1, $2)
+		 ON CONFLICT (assignment_id, student_name) DO UPDATE SET student_name = EXCLUDED.student_name
 		 RETURNING id, assignment_id, student_name, status, created_at`,
 		assignmentID, req.StudentName,
 	).Scan(&s.ID, &s.AssignmentID, &s.StudentName, &s.Status, &s.CreatedAt)
@@ -80,7 +83,21 @@ func (h *SubmissionHandler) Create(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to create submission")
 	}
 
-	return c.Status(fiber.StatusCreated).JSON(s)
+	var pageCount int
+	if err := h.DB.QueryRow(
+		c.Context(),
+		`SELECT COUNT(*) FROM submission_pages WHERE submission_id = $1`,
+		s.ID,
+	).Scan(&pageCount); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to load submission")
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(createSubmissionResponse{Submission: s, PageCount: pageCount})
+}
+
+type createSubmissionResponse struct {
+	models.Submission
+	PageCount int `json:"page_count"`
 }
 
 func (h *SubmissionHandler) ListForAssignment(c *fiber.Ctx) error {
