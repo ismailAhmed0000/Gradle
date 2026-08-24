@@ -8,6 +8,8 @@ import {
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 
+const ACCENT_COLOR = '#2f6690';
+
 type Props = {
   onSwitchToRegister: () => void;
 };
@@ -37,46 +39,58 @@ export function LoginScreen({ onSwitchToRegister }: Props) {
 
   return (
     <View className="flex-1 justify-center bg-white px-6">
-      <Text className="mb-8 text-center text-2xl font-bold text-gray-900">
+      <Text className="mb-8 text-center text-3xl font-bold text-gray-900">
         Welcome back
       </Text>
 
-      <Text className="mb-1 text-sm font-medium text-gray-700">Email</Text>
-      <TextInput
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-        autoCorrect={false}
-        keyboardType="email-address"
-        placeholder="you@example.com"
-        className="mb-4 rounded-lg border border-gray-300 px-4 py-3 text-base"
-      />
+      <View className="rounded-3xl bg-gray-50 p-6">
+        <Text className="mb-1 text-xs font-semibold tracking-wide text-gray-400">
+          EMAIL
+        </Text>
+        <TextInput
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="email-address"
+          placeholder="you@example.com"
+          className="mb-4 rounded-xl border border-gray-200 bg-white px-4 py-3 text-base"
+        />
 
-      <Text className="mb-1 text-sm font-medium text-gray-700">Password</Text>
-      <TextInput
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-        placeholder="••••••••"
-        className="mb-2 rounded-lg border border-gray-300 px-4 py-3 text-base"
-      />
+        <Text className="mb-1 text-xs font-semibold tracking-wide text-gray-400">
+          PASSWORD
+        </Text>
+        <TextInput
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+          placeholder="••••••••"
+          className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-base"
+        />
+      </View>
 
-      {error && <Text className="mb-2 text-sm text-red-600">{error}</Text>}
+      {error && (
+        <Text className="mt-3 text-center text-sm text-red-600">{error}</Text>
+      )}
 
       <Pressable
         onPress={handleSubmit}
         disabled={isSubmitting}
-        className="mt-4 items-center rounded-lg bg-indigo-600 py-3 disabled:opacity-60"
+        style={{ backgroundColor: ACCENT_COLOR }}
+        className="mt-6 items-center rounded-xl py-3.5 disabled:opacity-60"
       >
         {isSubmitting ? (
-          <ActivityIndicator color="#fff" />
+          <ActivityIndicator color="#ffffff" />
         ) : (
           <Text className="text-base font-semibold text-white">Log in</Text>
         )}
       </Pressable>
 
       <Pressable onPress={onSwitchToRegister} className="mt-6 items-center">
-        <Text className="text-sm text-indigo-600">
+        <Text
+          className="text-sm font-semibold"
+          style={{ color: ACCENT_COLOR }}
+        >
           Don't have an account? Sign up
         </Text>
       </Pressable>
