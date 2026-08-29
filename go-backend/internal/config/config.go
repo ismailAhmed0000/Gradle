@@ -22,6 +22,7 @@ type Config struct {
 	S3Region         string
 	S3VirtualHost    bool
 	InternalAPIToken string
+	CORSOrigins      string
 }
 
 func Load() (*Config, error) {
@@ -46,6 +47,7 @@ func Load() (*Config, error) {
 		S3Region:         getEnv("S3_REGION", "us-east-1"),
 		S3VirtualHost:    getEnv("S3_VIRTUAL_HOST_STYLE", "false") == "true",
 		InternalAPIToken: os.Getenv("INTERNAL_API_TOKEN"),
+		CORSOrigins:      getEnv("CORS_ORIGINS", "http://localhost:5173"),
 	}
 
 	if cfg.DatabaseURL == "" {

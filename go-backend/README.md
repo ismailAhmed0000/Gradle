@@ -33,6 +33,7 @@ All config is env vars, loaded via `.env` in this directory (see `internal/confi
 | `S3_BUCKET` | no | `gradle-artifacts` | |
 | `S3_REGION` | no | `us-east-1` | |
 | `S3_VIRTUAL_HOST_STYLE` | no | `false` | set `true` for providers that only support virtual-host addressing (`bucket.host.com/key`) instead of path-style (`host.com/bucket/key`) — Railway's bucket storage needs this; local MinIO doesn't |
+| `CORS_ORIGINS` | no | `http://localhost:5173` | comma-separated list of origins allowed to call the API from a browser (the `dashboard/` dev server) |
 
 ## Running locally
 
@@ -63,12 +64,21 @@ route map (`internal/router/router.go`).
 - `GET /api/auth/me`
 - `GET /api/dashboard` — weekly activity summary for the logged-in account (see the root
   README's note on the current student/teacher role gap)
-- `GET /api/assignments`, `GET /api/assignments/:id` — list/detail, including computed status
-  (`pending` / `expired` / `submitted` / `graded`) derived from due date + latest submission
+- `GET /api/assignments`, `POST /api/assignments`, `GET /api/assignments/:id` — list/create/detail,
+  including computed status (`pending` / `expired` / `submitted` / `graded`) derived from due
+  date + latest submission; creating requires an existing `subject_id`
 - `GET /api/assignments/:id/submissions`, `POST /api/assignments/:id/submissions` — one
   submission ("answer paper") per (assignment, student) pair; posting again for the same
-  student resumes their existing submission instead of creating a duplicate
+  student resumes their existing submission instead of creating a duplicate. If the
+  `student_name` matches a roster student (case-insensitive) for the same teacher, the
+  submission is auto-linked to that student's `id`
 - `GET /api/submissions/:id`, `POST /api/submissions/:id/pages`, `GET /api/submissions/:id/composited`
+- `GET /api/subjects`, `POST /api/subjects` — a teacher's subjects (e.g. "Math"); assignments
+  belong to one
+- `GET /api/students`, `POST /api/students` — a teacher's student roster
+- `POST /api/students/:id/enroll` — enroll a roster student into a subject
+- `GET /api/students/:id` — a student's enrolled subjects plus every assignment in those
+  subjects with their submission status (including assignments not yet started)
 
 **Internal** (`X-Internal-Token` header, `/internal/...`) — consumed only by `python-backend`;
 see `API_CONTRACT.md` for the full flow.

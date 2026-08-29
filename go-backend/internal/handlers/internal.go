@@ -1,24 +1,22 @@
 package handlers
 
 import (
-	"context"
 	"errors"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/gorm"
 
 	"gradle-go-backend/internal/models"
 	"gradle-go-backend/internal/queue"
 )
 
 type InternalHandler struct {
-	DB    *pgxpool.Pool
+	DB    *gorm.DB
 	Queue *queue.JobQueue
 }
 
-func NewInternalHandler(db *pgxpool.Pool, q *queue.JobQueue) *InternalHandler {
+func NewInternalHandler(db *gorm.DB, q *queue.JobQueue) *InternalHandler {
 	return &InternalHandler{DB: db, Queue: q}
 }
 
@@ -30,28 +28,25 @@ func (h *InternalHandler) AnswerRegionContext(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid answer region id")
 	}
 
-	var cropX, cropY, cropWidth, cropHeight float64
-	var rawImagePath string
-	err = h.DB.QueryRow(
-		c.Context(),
-		`SELECT ar.crop_x, ar.crop_y, ar.crop_width, ar.crop_height, sp.raw_image_path
-		 FROM answer_regions ar JOIN submission_pages sp ON sp.id = ar.source_page_id
-		 WHERE ar.id = $1`,
-		regionID,
-	).Scan(&cropX, &cropY, &cropWidth, &cropHeight, &rawImagePath)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	var region models.AnswerRegion
+	if err := h.DB.First(&region, "id = ?", regionID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fiber.NewError(fiber.StatusNotFound, "answer region not found")
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up answer region")
 	}
 
+	var page models.SubmissionPage
+	if err := h.DB.First(&page, "id = ?", region.SourcePageID).Error; err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up source page")
+	}
+
 	return c.JSON(fiber.Map{
-		"source_page": fiber.Map{"raw_image_path": rawImagePath},
-		"crop_x":      cropX,
-		"crop_y":      cropY,
-		"crop_width":  cropWidth,
-		"crop_height": cropHeight,
+		"source_page": fiber.Map{"raw_image_path": page.RawImagePath},
+		"crop_x":      region.CropX,
+		"crop_y":      region.CropY,
+		"crop_width":  region.CropWidth,
+		"crop_height": region.CropHeight,
 	})
 }
 
@@ -61,18 +56,14 @@ func (h *InternalHandler) StartAnswerRegion(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid answer region id")
 	}
 
-	if _, err := h.DB.Exec(
-		c.Context(),
-		`UPDATE answer_regions SET status = 'processing' WHERE id = $1`,
-		regionID,
-	); err != nil {
+	if err := h.DB.Model(&models.AnswerRegion{}).
+		Where("id = ?", regionID).
+		Update("status", models.AnswerRegionStatusProcessing).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to start answer region job")
 	}
-	if _, err := h.DB.Exec(
-		c.Context(),
-		`UPDATE processing_jobs SET status = 'running', updated_at = now() WHERE job_type = 'extract_ink' AND reference_id = $1`,
-		regionID,
-	); err != nil {
+	if err := h.DB.Model(&models.ProcessingJob{}).
+		Where("job_type = ? AND reference_id = ?", models.JobTypeExtractInk, regionID).
+		Update("status", "running").Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to update job status")
 	}
 
@@ -96,32 +87,30 @@ func (h *InternalHandler) ReportAnswerRegionResult(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
 	}
 
-	var submissionID uuid.UUID
-	err = h.DB.QueryRow(c.Context(), `SELECT submission_id FROM answer_regions WHERE id = $1`, regionID).Scan(&submissionID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	var region models.AnswerRegion
+	if err := h.DB.Select("id", "submission_id").First(&region, "id = ?", regionID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fiber.NewError(fiber.StatusNotFound, "answer region not found")
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up answer region")
 	}
+	submissionID := region.SubmissionID
 
 	switch req.Status {
 	case "done":
-		if _, err := h.DB.Exec(
-			c.Context(),
-			`UPDATE answer_regions SET status = 'done', extracted_ink_path = $1, error_message = NULL WHERE id = $2`,
-			req.ExtractedInkPath, regionID,
-		); err != nil {
+		if err := h.DB.Model(&models.AnswerRegion{}).Where("id = ?", regionID).Updates(map[string]any{
+			"status":             models.AnswerRegionStatusDone,
+			"extracted_ink_path": req.ExtractedInkPath,
+			"error_message":      nil,
+		}).Error; err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "failed to update answer region")
 		}
-		if _, err := h.DB.Exec(
-			c.Context(),
-			`UPDATE processing_jobs SET status = 'done', updated_at = now() WHERE job_type = 'extract_ink' AND reference_id = $1`,
-			regionID,
-		); err != nil {
+		if err := h.DB.Model(&models.ProcessingJob{}).
+			Where("job_type = ? AND reference_id = ?", models.JobTypeExtractInk, regionID).
+			Update("status", "done").Error; err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "failed to update job status")
 		}
-		compositedID, err := h.maybeStartCompositing(c.Context(), submissionID)
+		compositedID, err := h.maybeStartCompositing(submissionID)
 		if err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "failed to start compositing")
 		}
@@ -131,26 +120,20 @@ func (h *InternalHandler) ReportAnswerRegionResult(c *fiber.Ctx) error {
 			}
 		}
 	case "failed":
-		if _, err := h.DB.Exec(
-			c.Context(),
-			`UPDATE answer_regions SET status = 'failed', error_message = $1 WHERE id = $2`,
-			req.ErrorMessage, regionID,
-		); err != nil {
+		if err := h.DB.Model(&models.AnswerRegion{}).Where("id = ?", regionID).Updates(map[string]any{
+			"status":        models.AnswerRegionStatusFailed,
+			"error_message": req.ErrorMessage,
+		}).Error; err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "failed to update answer region")
 		}
-		if _, err := h.DB.Exec(
-			c.Context(),
-			`UPDATE processing_jobs SET status = 'failed', error_message = $1, updated_at = now()
-			 WHERE job_type = 'extract_ink' AND reference_id = $2`,
-			req.ErrorMessage, regionID,
-		); err != nil {
+		if err := h.DB.Model(&models.ProcessingJob{}).
+			Where("job_type = ? AND reference_id = ?", models.JobTypeExtractInk, regionID).
+			Updates(map[string]any{"status": "failed", "error_message": req.ErrorMessage}).Error; err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "failed to update job status")
 		}
-		if _, err := h.DB.Exec(
-			c.Context(),
-			`UPDATE submissions SET status = 'failed' WHERE id = $1`,
-			submissionID,
-		); err != nil {
+		if err := h.DB.Model(&models.Submission{}).
+			Where("id = ?", submissionID).
+			Update("status", models.SubmissionStatusFailed).Error; err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "failed to update submission")
 		}
 	default:
@@ -163,53 +146,51 @@ func (h *InternalHandler) ReportAnswerRegionResult(c *fiber.Ctx) error {
 // maybeStartCompositing creates a composited_documents row once every answer
 // region for the submission has finished extraction, returning its id so the
 // caller can enqueue the composite_pdf job outside the DB transaction.
-func (h *InternalHandler) maybeStartCompositing(ctx context.Context, submissionID uuid.UUID) (*uuid.UUID, error) {
-	var remaining, total int
-	err := h.DB.QueryRow(
-		ctx,
-		`SELECT COUNT(*) FILTER (WHERE status != 'done'), COUNT(*) FROM answer_regions WHERE submission_id = $1`,
-		submissionID,
-	).Scan(&remaining, &total)
-	if err != nil {
+func (h *InternalHandler) maybeStartCompositing(submissionID uuid.UUID) (*uuid.UUID, error) {
+	var total, done int64
+	if err := h.DB.Model(&models.AnswerRegion{}).Where("submission_id = ?", submissionID).Count(&total).Error; err != nil {
 		return nil, err
 	}
-	if total == 0 || remaining > 0 {
+	if err := h.DB.Model(&models.AnswerRegion{}).
+		Where("submission_id = ? AND status = ?", submissionID, models.AnswerRegionStatusDone).
+		Count(&done).Error; err != nil {
+		return nil, err
+	}
+	if total == 0 || done < total {
 		return nil, nil
 	}
 
-	tx, err := h.DB.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
-
-	var nextVersion int
-	if err := tx.QueryRow(
-		ctx,
-		`SELECT COALESCE(MAX(version), 0) + 1 FROM composited_documents WHERE submission_id = $1`,
-		submissionID,
-	).Scan(&nextVersion); err != nil {
-		return nil, err
-	}
-
 	var compositedID uuid.UUID
-	if err := tx.QueryRow(
-		ctx,
-		`INSERT INTO composited_documents (submission_id, version, status) VALUES ($1, $2, 'pending') RETURNING id`,
-		submissionID, nextVersion,
-	).Scan(&compositedID); err != nil {
-		return nil, err
-	}
+	err := h.DB.Transaction(func(tx *gorm.DB) error {
+		var latest models.CompositedDocument
+		nextVersion := 1
+		err := tx.Where("submission_id = ?", submissionID).Order("version DESC").First(&latest).Error
+		switch {
+		case err == nil:
+			nextVersion = latest.Version + 1
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			// first composited document for this submission
+		default:
+			return err
+		}
 
-	if _, err := tx.Exec(
-		ctx,
-		`INSERT INTO processing_jobs (job_type, reference_id, status) VALUES ('composite_pdf', $1, 'queued')`,
-		compositedID,
-	); err != nil {
-		return nil, err
-	}
+		doc := models.CompositedDocument{
+			SubmissionID: submissionID,
+			Version:      nextVersion,
+			Status:       models.CompositedDocumentStatusPending,
+		}
+		if err := tx.Create(&doc).Error; err != nil {
+			return err
+		}
+		compositedID = doc.ID
 
-	if err := tx.Commit(ctx); err != nil {
+		return tx.Create(&models.ProcessingJob{
+			JobType:     models.JobTypeCompositePDF,
+			ReferenceID: doc.ID,
+			Status:      "queued",
+		}).Error
+	})
+	if err != nil {
 		return nil, err
 	}
 
@@ -231,6 +212,19 @@ type compositeAnswer struct {
 	QuestionID       uuid.UUID `json:"question_id"`
 }
 
+type compositeAnswerRow struct {
+	AssignmentFileID uuid.UUID
+	ExtractedInkPath *string
+	HasDefinedRegion bool
+	PageNumber       *int
+	RegionX          *float64
+	RegionY          *float64
+	RegionWidth      *float64
+	RegionHeight     *float64
+	QuestionNumber   int
+	QuestionID       uuid.UUID
+}
+
 type compositeAssignmentFile struct {
 	ID       uuid.UUID `json:"id"`
 	FilePath string    `json:"file_path"`
@@ -242,85 +236,60 @@ func (h *InternalHandler) CompositeContext(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid composited document id")
 	}
 
-	var submissionID uuid.UUID
-	var version int
-	var assignmentID uuid.UUID
-	err = h.DB.QueryRow(
-		c.Context(),
-		`SELECT cd.submission_id, cd.version, s.assignment_id
-		 FROM composited_documents cd JOIN submissions s ON s.id = cd.submission_id
-		 WHERE cd.id = $1`,
-		compositedID,
-	).Scan(&submissionID, &version, &assignmentID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	var doc models.CompositedDocument
+	if err := h.DB.Select("id", "submission_id", "version").First(&doc, "id = ?", compositedID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fiber.NewError(fiber.StatusNotFound, "composited document not found")
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up composited document")
 	}
 
-	answerRows, err := h.DB.Query(
-		c.Context(),
-		`SELECT q.assignment_file_id, ar.extracted_ink_path, q.has_defined_region,
-		        q.page_number, q.region_x, q.region_y, q.region_width, q.region_height,
-		        q.question_number, q.id
-		 FROM answer_regions ar JOIN questions q ON q.id = ar.question_id
-		 WHERE ar.submission_id = $1 AND ar.status = 'done'
-		 ORDER BY q.question_number ASC`,
-		submissionID,
-	)
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "failed to load answers")
-	}
-	answers := []compositeAnswer{}
-	for answerRows.Next() {
-		var a compositeAnswer
-		var inkPath *string
-		if err := answerRows.Scan(
-			&a.AssignmentFileID, &inkPath, &a.HasDefinedRegion,
-			&a.PageNumber, &a.RegionX, &a.RegionY, &a.RegionWidth, &a.RegionHeight,
-			&a.QuestionNumber, &a.QuestionID,
-		); err != nil {
-			answerRows.Close()
-			return fiber.NewError(fiber.StatusInternalServerError, "failed to read answers")
-		}
-		if inkPath != nil {
-			a.ExtractedInkPath = *inkPath
-		}
-		answers = append(answers, a)
-	}
-	rowErr := answerRows.Err()
-	answerRows.Close()
-	if rowErr != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "failed to read answers")
+	var submission models.Submission
+	if err := h.DB.Select("id", "assignment_id").First(&submission, "id = ?", doc.SubmissionID).Error; err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up submission")
 	}
 
-	fileRows, err := h.DB.Query(
-		c.Context(),
-		`SELECT id, file_path FROM assignment_files WHERE assignment_id = $1`,
-		assignmentID,
-	)
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "failed to load assignment files")
+	var answerRows []compositeAnswerRow
+	if err := h.DB.Table("answer_regions").
+		Select(`questions.assignment_file_id, answer_regions.extracted_ink_path, questions.has_defined_region,
+		        questions.page_number, questions.region_x, questions.region_y, questions.region_width, questions.region_height,
+		        questions.question_number, questions.id AS question_id`).
+		Joins("JOIN questions ON questions.id = answer_regions.question_id").
+		Where("answer_regions.submission_id = ? AND answer_regions.status = ?", doc.SubmissionID, models.AnswerRegionStatusDone).
+		Order("questions.question_number ASC").
+		Find(&answerRows).Error; err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to load answers")
 	}
-	files := []compositeAssignmentFile{}
-	for fileRows.Next() {
-		var f compositeAssignmentFile
-		if err := fileRows.Scan(&f.ID, &f.FilePath); err != nil {
-			fileRows.Close()
-			return fiber.NewError(fiber.StatusInternalServerError, "failed to read assignment files")
+
+	answers := make([]compositeAnswer, len(answerRows))
+	for i, r := range answerRows {
+		answers[i] = compositeAnswer{
+			AssignmentFileID: r.AssignmentFileID,
+			HasDefinedRegion: r.HasDefinedRegion,
+			PageNumber:       r.PageNumber,
+			RegionX:          r.RegionX,
+			RegionY:          r.RegionY,
+			RegionWidth:      r.RegionWidth,
+			RegionHeight:     r.RegionHeight,
+			QuestionNumber:   r.QuestionNumber,
+			QuestionID:       r.QuestionID,
 		}
-		files = append(files, f)
+		if r.ExtractedInkPath != nil {
+			answers[i].ExtractedInkPath = *r.ExtractedInkPath
+		}
 	}
-	rowErr = fileRows.Err()
-	fileRows.Close()
-	if rowErr != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "failed to read assignment files")
+
+	files := []compositeAssignmentFile{}
+	if err := h.DB.Table("assignment_files").
+		Select("id, file_path").
+		Where("assignment_id = ?", submission.AssignmentID).
+		Find(&files).Error; err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to load assignment files")
 	}
 
 	return c.JSON(fiber.Map{
-		"submission_id":    submissionID,
-		"version":          version,
+		"submission_id":    doc.SubmissionID,
+		"version":          doc.Version,
 		"answers":          answers,
 		"assignment_files": files,
 	})
@@ -332,18 +301,14 @@ func (h *InternalHandler) StartComposite(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid composited document id")
 	}
 
-	if _, err := h.DB.Exec(
-		c.Context(),
-		`UPDATE composited_documents SET status = 'generating' WHERE id = $1`,
-		compositedID,
-	); err != nil {
+	if err := h.DB.Model(&models.CompositedDocument{}).
+		Where("id = ?", compositedID).
+		Update("status", models.CompositedDocumentStatusGenerating).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to start compositing job")
 	}
-	if _, err := h.DB.Exec(
-		c.Context(),
-		`UPDATE processing_jobs SET status = 'running', updated_at = now() WHERE job_type = 'composite_pdf' AND reference_id = $1`,
-		compositedID,
-	); err != nil {
+	if err := h.DB.Model(&models.ProcessingJob{}).
+		Where("job_type = ? AND reference_id = ?", models.JobTypeCompositePDF, compositedID).
+		Update("status", "running").Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to update job status")
 	}
 
@@ -374,76 +339,62 @@ func (h *InternalHandler) ReportCompositeResult(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
 	}
 
-	var submissionID uuid.UUID
-	err = h.DB.QueryRow(
-		c.Context(), `SELECT submission_id FROM composited_documents WHERE id = $1`, compositedID,
-	).Scan(&submissionID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	var doc models.CompositedDocument
+	if err := h.DB.Select("id", "submission_id").First(&doc, "id = ?", compositedID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fiber.NewError(fiber.StatusNotFound, "composited document not found")
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up composited document")
 	}
+	submissionID := doc.SubmissionID
 
 	switch req.Status {
 	case "done":
-		tx, err := h.DB.Begin(c.Context())
+		err := h.DB.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&models.CompositedDocument{}).Where("id = ?", compositedID).Updates(map[string]any{
+				"status":        models.CompositedDocumentStatusDone,
+				"file_path":     req.FilePath,
+				"error_message": nil,
+			}).Error; err != nil {
+				return err
+			}
+			for _, p := range req.Pages {
+				if err := tx.Create(&models.CompositedDocumentPage{
+					CompositedDocumentID: compositedID,
+					PageNumber:           p.PageNumber,
+					PageType:             models.CompositedPageType(p.PageType),
+					QuestionID:           p.QuestionID,
+				}).Error; err != nil {
+					return err
+				}
+			}
+			return tx.Model(&models.Submission{}).
+				Where("id = ?", submissionID).
+				Update("status", models.SubmissionStatusComposited).Error
+		})
 		if err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "failed to update composited document")
 		}
-		defer tx.Rollback(c.Context())
-
-		if _, err := tx.Exec(
-			c.Context(),
-			`UPDATE composited_documents SET status = 'done', file_path = $1, error_message = NULL WHERE id = $2`,
-			req.FilePath, compositedID,
-		); err != nil {
-			return fiber.NewError(fiber.StatusInternalServerError, "failed to update composited document")
-		}
-		for _, p := range req.Pages {
-			if _, err := tx.Exec(
-				c.Context(),
-				`INSERT INTO composited_document_pages (composited_document_id, page_number, page_type, question_id)
-				 VALUES ($1, $2, $3, $4)`,
-				compositedID, p.PageNumber, p.PageType, p.QuestionID,
-			); err != nil {
-				return fiber.NewError(fiber.StatusInternalServerError, "failed to record composited pages")
-			}
-		}
-		if _, err := tx.Exec(
-			c.Context(), `UPDATE submissions SET status = 'composited' WHERE id = $1`, submissionID,
-		); err != nil {
-			return fiber.NewError(fiber.StatusInternalServerError, "failed to update submission")
-		}
-		if err := tx.Commit(c.Context()); err != nil {
-			return fiber.NewError(fiber.StatusInternalServerError, "failed to update composited document")
-		}
-		if _, err := h.DB.Exec(
-			c.Context(),
-			`UPDATE processing_jobs SET status = 'done', updated_at = now() WHERE job_type = 'composite_pdf' AND reference_id = $1`,
-			compositedID,
-		); err != nil {
+		if err := h.DB.Model(&models.ProcessingJob{}).
+			Where("job_type = ? AND reference_id = ?", models.JobTypeCompositePDF, compositedID).
+			Update("status", "done").Error; err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "failed to update job status")
 		}
 	case "failed":
-		if _, err := h.DB.Exec(
-			c.Context(),
-			`UPDATE composited_documents SET status = 'failed', error_message = $1 WHERE id = $2`,
-			req.ErrorMessage, compositedID,
-		); err != nil {
+		if err := h.DB.Model(&models.CompositedDocument{}).Where("id = ?", compositedID).Updates(map[string]any{
+			"status":        models.CompositedDocumentStatusFailed,
+			"error_message": req.ErrorMessage,
+		}).Error; err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "failed to update composited document")
 		}
-		if _, err := h.DB.Exec(
-			c.Context(),
-			`UPDATE processing_jobs SET status = 'failed', error_message = $1, updated_at = now()
-			 WHERE job_type = 'composite_pdf' AND reference_id = $2`,
-			req.ErrorMessage, compositedID,
-		); err != nil {
+		if err := h.DB.Model(&models.ProcessingJob{}).
+			Where("job_type = ? AND reference_id = ?", models.JobTypeCompositePDF, compositedID).
+			Updates(map[string]any{"status": "failed", "error_message": req.ErrorMessage}).Error; err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "failed to update job status")
 		}
-		if _, err := h.DB.Exec(
-			c.Context(), `UPDATE submissions SET status = 'failed' WHERE id = $1`, submissionID,
-		); err != nil {
+		if err := h.DB.Model(&models.Submission{}).
+			Where("id = ?", submissionID).
+			Update("status", models.SubmissionStatusFailed).Error; err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "failed to update submission")
 		}
 	default:

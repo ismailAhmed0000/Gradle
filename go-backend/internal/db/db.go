@@ -1,20 +1,28 @@
 package db
 
 import (
-	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
-func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
-	pool, err := pgxpool.New(ctx, databaseURL)
+func NewGormDB(databaseURL string) (*gorm.DB, error) {
+	gormDB, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
 	if err != nil {
-		return nil, fmt.Errorf("creating db pool: %w", err)
+		return nil, fmt.Errorf("opening db: %w", err)
 	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
+
+	sqlDB, err := gormDB.DB()
+	if err != nil {
+		return nil, fmt.Errorf("getting underlying db handle: %w", err)
+	}
+	if err := sqlDB.Ping(); err != nil {
 		return nil, fmt.Errorf("pinging db: %w", err)
 	}
-	return pool, nil
+
+	return gormDB, nil
 }

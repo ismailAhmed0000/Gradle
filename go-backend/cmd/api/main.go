@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"log"
 
 	"github.com/gofiber/fiber/v2"
@@ -20,11 +19,15 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	pool, err := db.NewPool(context.Background(), cfg.DatabaseURL)
+	gormDB, err := db.NewGormDB(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("database: %v", err)
 	}
-	defer pool.Close()
+	sqlDB, err := gormDB.DB()
+	if err != nil {
+		log.Fatalf("database: %v", err)
+	}
+	defer sqlDB.Close()
 
 	s3, err := storage.NewS3Storage(cfg.S3EndpointURL, cfg.S3PublicURL, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3Region, cfg.S3VirtualHost)
 	if err != nil {
@@ -41,11 +44,13 @@ func main() {
 	})
 
 	h := &router.Handlers{
-		Auth:        handlers.NewAuthHandler(pool, cfg),
-		Assignments: handlers.NewAssignmentHandler(pool, s3),
-		Submissions: handlers.NewSubmissionHandler(pool, s3, jobQueue),
-		Internal:    handlers.NewInternalHandler(pool, jobQueue),
-		Dashboard:   handlers.NewDashboardHandler(pool),
+		Auth:        handlers.NewAuthHandler(gormDB, cfg),
+		Assignments: handlers.NewAssignmentHandler(gormDB, s3),
+		Submissions: handlers.NewSubmissionHandler(gormDB, s3, jobQueue),
+		Internal:    handlers.NewInternalHandler(gormDB, jobQueue),
+		Dashboard:   handlers.NewDashboardHandler(gormDB),
+		Subjects:    handlers.NewSubjectHandler(gormDB),
+		Students:    handlers.NewStudentHandler(gormDB),
 	}
 	router.Setup(app, h, cfg)
 

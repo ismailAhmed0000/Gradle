@@ -1,0 +1,952 @@
+openapi: 3.0.3
+info:
+  title: Gradle API
+  description: >
+    Teacher-facing REST API served by go-backend. Hand-written from the actual
+    Fiber routes/handlers in go-backend/internal (no spec existed upstream) so
+    the dashboard can codegen types + a typed client from it. Keep in sync
+    with go-backend/internal/router/router.go when routes change.
+  version: "1.0.0"
+servers:
+  - url: http://localhost:8080
+    description: Local dev
+security:
+  - bearerAuth: []
+paths:
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Liveness check
+      security: []
+      responses:
+        "200":
+          description: OK
+
+  /api/auth/register:
+    post:
+      operationId: register
+      summary: Create a teacher account
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /api/auth/login:
+    post:
+      operationId: login
+      summary: Log in
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+
+  /api/auth/me:
+    get:
+      operationId: getMe
+      summary: Get the logged-in user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/dashboard:
+    get:
+      operationId: getDashboardSummary
+      summary: Weekly activity summary for the logged-in teacher
+      responses:
+        "200":
+          description: Summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+        "401":
+          $ref: "#/components/responses/Error"
+
+  /api/assignments:
+    get:
+      operationId: listAssignments
+      summary: List assignments owned by the logged-in teacher
+      responses:
+        "200":
+          description: Assignments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Assignment"
+        "401":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createAssignment
+      summary: Create an assignment under a subject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAssignmentRequest"
+      responses:
+        "201":
+          description: Assignment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Assignment"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+
+  /api/assignments/{id}:
+    parameters:
+      - $ref: "#/components/parameters/AssignmentId"
+    get:
+      operationId: getAssignment
+      summary: Get assignment detail (questions + files)
+      responses:
+        "200":
+          description: Assignment detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignmentDetail"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/assignments/{id}/submissions:
+    parameters:
+      - $ref: "#/components/parameters/AssignmentId"
+    get:
+      operationId: listSubmissionsForAssignment
+      summary: List submissions for an assignment
+      responses:
+        "200":
+          description: Submissions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SubmissionSummary"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createSubmission
+      summary: Create (or resume) a student's submission for an assignment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSubmissionRequest"
+      responses:
+        "201":
+          description: Submission created or resumed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateSubmissionResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/submissions/{id}:
+    parameters:
+      - $ref: "#/components/parameters/SubmissionId"
+    get:
+      operationId: getSubmission
+      summary: Get submission detail (pages, answer regions, composited doc)
+      responses:
+        "200":
+          description: Submission detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionDetail"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/submissions/{id}/pages:
+    parameters:
+      - $ref: "#/components/parameters/SubmissionId"
+    post:
+      operationId: uploadSubmissionPage
+      summary: Upload a scanned page for a submission
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [page_number, page]
+              properties:
+                page_number:
+                  type: integer
+                  minimum: 1
+                page:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: Page stored and answer-region extraction jobs queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadPageResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/submissions/{id}/composited:
+    parameters:
+      - $ref: "#/components/parameters/SubmissionId"
+    get:
+      operationId: getSubmissionComposited
+      summary: Get the composited PDF status / download link for a submission
+      responses:
+        "200":
+          description: Composited document status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompositedStatusResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/subjects:
+    get:
+      operationId: listSubjects
+      summary: List the logged-in teacher's subjects
+      responses:
+        "200":
+          description: Subjects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Subject"
+        "401":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createSubject
+      summary: Create a subject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSubjectRequest"
+      responses:
+        "201":
+          description: Subject created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Subject"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /api/students:
+    get:
+      operationId: listStudents
+      summary: List the logged-in teacher's student roster
+      responses:
+        "200":
+          description: Students
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StudentSummary"
+        "401":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createStudent
+      summary: Add a student to the roster
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateStudentRequest"
+      responses:
+        "201":
+          description: Student created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Student"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /api/students/{id}:
+    parameters:
+      - $ref: "#/components/parameters/StudentId"
+    get:
+      operationId: getStudent
+      summary: Get a student's enrolled subjects and work across assignments
+      responses:
+        "200":
+          description: Student detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentDetail"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/students/{id}/enroll:
+    parameters:
+      - $ref: "#/components/parameters/StudentId"
+    post:
+      operationId: enrollStudent
+      summary: Enroll a student into a subject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnrollRequest"
+      responses:
+        "201":
+          description: Student's enrolled subjects after enrolling
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Subject"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    AssignmentId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SubmissionId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    StudentId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    Role:
+      type: string
+      enum: [teacher, admin]
+
+    User:
+      type: object
+      required: [id, email, role, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        role:
+          $ref: "#/components/schemas/Role"
+        created_at:
+          type: string
+          format: date-time
+
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+          minLength: 8
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+
+    AuthResponse:
+      type: object
+      required: [token, user]
+      properties:
+        token:
+          type: string
+        user:
+          $ref: "#/components/schemas/User"
+
+    DailyActivity:
+      type: object
+      required: [date, weekday, pages_scanned]
+      properties:
+        date:
+          type: string
+          format: date
+        weekday:
+          type: string
+        pages_scanned:
+          type: integer
+
+    DashboardSummary:
+      type: object
+      required:
+        - today_pages_scanned
+        - weekly_activity
+        - submitted_this_week
+        - pending_this_week
+        - submissions_this_week
+        - pages_scanned_this_week
+      properties:
+        today_pages_scanned:
+          type: integer
+        weekly_activity:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyActivity"
+        submitted_this_week:
+          type: integer
+        pending_this_week:
+          type: integer
+        submissions_this_week:
+          type: integer
+        pages_scanned_this_week:
+          type: integer
+
+    AssignmentStatus:
+      type: string
+      enum: [pending, expired, submitted, graded]
+
+    Assignment:
+      type: object
+      required: [id, owner_id, title, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        owner_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        subject_id:
+          type: string
+          format: uuid
+          nullable: true
+        subject_name:
+          type: string
+          nullable: true
+        due_date:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          $ref: "#/components/schemas/AssignmentStatus"
+        created_at:
+          type: string
+          format: date-time
+
+    CreateAssignmentRequest:
+      type: object
+      required: [title, subject_id]
+      properties:
+        title:
+          type: string
+        subject_id:
+          type: string
+          format: uuid
+        due_date:
+          type: string
+          format: date-time
+          nullable: true
+
+    AssignmentFile:
+      type: object
+      required: [id, assignment_id, file_path, page_count, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        assignment_id:
+          type: string
+          format: uuid
+        file_path:
+          type: string
+        page_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        download_url:
+          type: string
+
+    Question:
+      type: object
+      required: [id, assignment_id, assignment_file_id, question_number, has_defined_region, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        assignment_id:
+          type: string
+          format: uuid
+        assignment_file_id:
+          type: string
+          format: uuid
+        question_number:
+          type: integer
+        has_defined_region:
+          type: boolean
+        page_number:
+          type: integer
+          nullable: true
+        region_x:
+          type: number
+          nullable: true
+        region_y:
+          type: number
+          nullable: true
+        region_width:
+          type: number
+          nullable: true
+        region_height:
+          type: number
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    AssignmentDetail:
+      allOf:
+        - $ref: "#/components/schemas/Assignment"
+        - type: object
+          required: [teacher_email, questions, assignment_files]
+          properties:
+            teacher_email:
+              type: string
+            questions:
+              type: array
+              items:
+                $ref: "#/components/schemas/Question"
+            assignment_files:
+              type: array
+              items:
+                $ref: "#/components/schemas/AssignmentFile"
+
+    SubmissionStatus:
+      type: string
+      enum: [pending, processing, composited, failed]
+
+    Submission:
+      type: object
+      required: [id, assignment_id, student_name, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        assignment_id:
+          type: string
+          format: uuid
+        student_id:
+          type: string
+          format: uuid
+          nullable: true
+        student_name:
+          type: string
+        status:
+          $ref: "#/components/schemas/SubmissionStatus"
+        created_at:
+          type: string
+          format: date-time
+
+    SubmissionSummary:
+      allOf:
+        - $ref: "#/components/schemas/Submission"
+        - type: object
+          required: [page_count, answer_regions_done, answer_regions_total]
+          properties:
+            page_count:
+              type: integer
+            answer_regions_done:
+              type: integer
+            answer_regions_total:
+              type: integer
+
+    SubmissionPage:
+      type: object
+      required: [id, submission_id, page_number, raw_image_path, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        submission_id:
+          type: string
+          format: uuid
+        page_number:
+          type: integer
+        raw_image_path:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    AnswerRegionStatus:
+      type: string
+      enum: [pending, processing, done, failed]
+
+    AnswerRegion:
+      type: object
+      required:
+        - id
+        - submission_id
+        - question_id
+        - question_number
+        - source_page_id
+        - status
+        - crop_x
+        - crop_y
+        - crop_width
+        - crop_height
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        submission_id:
+          type: string
+          format: uuid
+        question_id:
+          type: string
+          format: uuid
+        question_number:
+          type: integer
+        source_page_id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/AnswerRegionStatus"
+        crop_x:
+          type: number
+        crop_y:
+          type: number
+        crop_width:
+          type: number
+        crop_height:
+          type: number
+        extracted_ink_path:
+          type: string
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    CompositedDocumentStatus:
+      type: string
+      enum: [pending, generating, done, failed]
+
+    CompositedDocument:
+      type: object
+      required: [id, submission_id, version, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        submission_id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        status:
+          $ref: "#/components/schemas/CompositedDocumentStatus"
+        file_path:
+          type: string
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    SubmissionDetail:
+      allOf:
+        - $ref: "#/components/schemas/Submission"
+        - type: object
+          required: [pages, answer_regions]
+          properties:
+            pages:
+              type: array
+              items:
+                $ref: "#/components/schemas/SubmissionPage"
+            answer_regions:
+              type: array
+              items:
+                $ref: "#/components/schemas/AnswerRegion"
+            composited_document:
+              $ref: "#/components/schemas/CompositedDocument"
+
+    CreateSubmissionRequest:
+      type: object
+      required: [student_name]
+      properties:
+        student_name:
+          type: string
+
+    CreateSubmissionResponse:
+      allOf:
+        - $ref: "#/components/schemas/Submission"
+        - type: object
+          required: [page_count]
+          properties:
+            page_count:
+              type: integer
+
+    UploadPageResponse:
+      type: object
+      required: [page, answer_regions_queued]
+      properties:
+        page:
+          $ref: "#/components/schemas/SubmissionPage"
+        answer_regions_queued:
+          type: integer
+
+    CompositedStatusResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: "#/components/schemas/CompositedDocumentStatus"
+        download_url:
+          type: string
+        error_message:
+          type: string
+
+    Subject:
+      type: object
+      required: [id, owner_id, name, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        owner_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    CreateSubjectRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+
+    Student:
+      type: object
+      required: [id, owner_id, name, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        owner_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    StudentSummary:
+      allOf:
+        - $ref: "#/components/schemas/Student"
+        - type: object
+          required: [subjects]
+          properties:
+            subjects:
+              type: array
+              items:
+                $ref: "#/components/schemas/Subject"
+
+    CreateStudentRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          nullable: true
+
+    EnrollRequest:
+      type: object
+      required: [subject_id]
+      properties:
+        subject_id:
+          type: string
+          format: uuid
+
+    StudentWork:
+      type: object
+      required: [assignment_id, assignment_title, page_count, answer_regions_done, answer_regions_total]
+      properties:
+        submission_id:
+          type: string
+          format: uuid
+        assignment_id:
+          type: string
+          format: uuid
+        assignment_title:
+          type: string
+        subject_name:
+          type: string
+          nullable: true
+        status:
+          allOf:
+            - $ref: "#/components/schemas/SubmissionStatus"
+          nullable: true
+        page_count:
+          type: integer
+        answer_regions_done:
+          type: integer
+        answer_regions_total:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    StudentDetail:
+      allOf:
+        - $ref: "#/components/schemas/Student"
+        - type: object
+          required: [subjects, submissions]
+          properties:
+            subjects:
+              type: array
+              items:
+                $ref: "#/components/schemas/Subject"
+            submissions:
+              type: array
+              items:
+                $ref: "#/components/schemas/StudentWork"

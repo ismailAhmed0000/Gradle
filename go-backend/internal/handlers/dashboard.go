@@ -1,52 +1,60 @@
 package handlers
 
 import (
-	"context"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"gradle-go-backend/internal/middleware"
 	"gradle-go-backend/internal/models"
 )
 
 type DashboardHandler struct {
-	DB *pgxpool.Pool
+	DB *gorm.DB
 }
 
-func NewDashboardHandler(db *pgxpool.Pool) *DashboardHandler {
+func NewDashboardHandler(db *gorm.DB) *DashboardHandler {
 	return &DashboardHandler{DB: db}
 }
 
 func (h *DashboardHandler) Summary(c *fiber.Ctx) error {
-	ownerID := c.Locals(middleware.LocalsUserID)
+	ownerID, err := middleware.UserIDFromContext(c)
+	if err != nil {
+		return fiber.NewError(fiber.StatusUnauthorized, "invalid token")
+	}
 
-	activity, err := h.weeklyActivity(c.Context(), ownerID)
+	activity, err := h.weeklyActivity(ownerID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to load weekly activity")
 	}
 
-	var todayPages int
-	if err := h.DB.QueryRow(
-		c.Context(),
-		`SELECT COUNT(*) FROM submission_pages sp
-		 JOIN submissions s ON s.id = sp.submission_id
-		 JOIN assignments a ON a.id = s.assignment_id
-		 WHERE a.owner_id = $1 AND sp.created_at::date = CURRENT_DATE`,
-		ownerID,
-	).Scan(&todayPages); err != nil {
+	var todayPages int64
+	if err := h.DB.Table("submission_pages").
+		Joins("JOIN submissions ON submissions.id = submission_pages.submission_id").
+		Joins("JOIN assignments ON assignments.id = submissions.assignment_id").
+		Where("assignments.owner_id = ? AND submission_pages.created_at::date = CURRENT_DATE", ownerID).
+		Count(&todayPages).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to load today's activity")
 	}
 
-	var composited, totalSubmissions int
-	if err := h.DB.QueryRow(
-		c.Context(),
-		`SELECT COUNT(*) FILTER (WHERE s.status = 'composited'), COUNT(*)
-		 FROM submissions s JOIN assignments a ON a.id = s.assignment_id
-		 WHERE a.owner_id = $1 AND s.created_at >= CURRENT_DATE - INTERVAL '6 days'`,
-		ownerID,
-	).Scan(&composited, &totalSubmissions); err != nil {
+	weekStart := time.Now().AddDate(0, 0, -6)
+
+	var totalSubmissions int64
+	if err := h.DB.Table("submissions").
+		Joins("JOIN assignments ON assignments.id = submissions.assignment_id").
+		Where("assignments.owner_id = ? AND submissions.created_at >= ?", ownerID, weekStart).
+		Count(&totalSubmissions).Error; err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to load submission stats")
+	}
+
+	var composited int64
+	if err := h.DB.Table("submissions").
+		Joins("JOIN assignments ON assignments.id = submissions.assignment_id").
+		Where("assignments.owner_id = ? AND submissions.created_at >= ? AND submissions.status = ?",
+			ownerID, weekStart, models.SubmissionStatusComposited).
+		Count(&composited).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to load submission stats")
 	}
 
@@ -56,18 +64,27 @@ func (h *DashboardHandler) Summary(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(models.DashboardSummary{
-		TodayPagesScanned:    todayPages,
+		TodayPagesScanned:    int(todayPages),
 		WeeklyActivity:       activity,
-		SubmittedThisWeek:    totalSubmissions,
-		PendingThisWeek:      totalSubmissions - composited,
-		SubmissionsThisWeek:  totalSubmissions,
+		SubmittedThisWeek:    int(totalSubmissions),
+		PendingThisWeek:      int(totalSubmissions - composited),
+		SubmissionsThisWeek:  int(totalSubmissions),
 		PagesScannedThisWeek: pagesThisWeek,
 	})
 }
 
-func (h *DashboardHandler) weeklyActivity(ctx context.Context, ownerID interface{}) ([]models.DailyActivity, error) {
-	rows, err := h.DB.Query(
-		ctx,
+type dailyActivityRow struct {
+	Day          time.Time
+	PagesScanned int
+}
+
+// weeklyActivity builds a full 7-day calendar (including days with zero
+// scans) and counts pages scanned per day — a generate_series + left join
+// that's clearer as one SQL statement than as a chain of ORM calls, so it
+// stays a Raw query executed through GORM rather than the query builder.
+func (h *DashboardHandler) weeklyActivity(ownerID uuid.UUID) ([]models.DailyActivity, error) {
+	var rows []dailyActivityRow
+	err := h.DB.Raw(
 		`WITH days AS (
 		   SELECT generate_series(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, INTERVAL '1 day')::date AS day
 		 ),
@@ -76,32 +93,26 @@ func (h *DashboardHandler) weeklyActivity(ctx context.Context, ownerID interface
 		   FROM submission_pages sp
 		   JOIN submissions s ON s.id = sp.submission_id
 		   JOIN assignments a ON a.id = s.assignment_id
-		   WHERE a.owner_id = $1
+		   WHERE a.owner_id = ?
 		 )
-		 SELECT d.day, COUNT(p.id)
+		 SELECT d.day AS day, COUNT(p.id) AS pages_scanned
 		 FROM days d LEFT JOIN pages p ON p.day = d.day
 		 GROUP BY d.day ORDER BY d.day`,
 		ownerID,
-	)
+	).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	activity := []models.DailyActivity{}
-	for rows.Next() {
-		var day time.Time
-		var count int
-		if err := rows.Scan(&day, &count); err != nil {
-			return nil, err
+	activity := make([]models.DailyActivity, len(rows))
+	for i, row := range rows {
+		activity[i] = models.DailyActivity{
+			Date:         row.Day.Format("2006-01-02"),
+			Weekday:      weekdayLetter(row.Day.Weekday()),
+			PagesScanned: row.PagesScanned,
 		}
-		activity = append(activity, models.DailyActivity{
-			Date:         day.Format("2006-01-02"),
-			Weekday:      weekdayLetter(day.Weekday()),
-			PagesScanned: count,
-		})
 	}
-	return activity, rows.Err()
+	return activity, nil
 }
 
 func weekdayLetter(d time.Weekday) string {

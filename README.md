@@ -24,7 +24,7 @@ python-backend (Python worker) ── OpenCV ink extraction, PyMuPDF PDF composi
   token-authenticated HTTP API — it never touches Postgres directly.
 - **mobile-app** is the React Native client **students** use: view assignments, scan and submit
   their own answer sheet with the camera, view graded results. Teachers use a separate
-  **dashboard** (web) to manage assignments — see the note under Repo layout below.
+  **dashboard** (web) to manage assignments — see [`dashboard/README.md`](dashboard/README.md).
 
 The exact wire contract between go-backend and python-backend (Redis payloads, internal HTTP
 endpoints, S3 key conventions) is in [`API_CONTRACT.md`](API_CONTRACT.md) — read that before
@@ -35,6 +35,7 @@ Each subproject has its own README with setup/run instructions:
 - [`go-backend/README.md`](go-backend/README.md)
 - [`python-backend/README.md`](python-backend/README.md)
 - [`mobile-app/README.md`](mobile-app/README.md)
+- [`dashboard/README.md`](dashboard/README.md)
 
 ## Shared infrastructure
 
@@ -58,9 +59,10 @@ docker-compose in this repo yet.
 [`.railway/railway.ts`](.railway/railway.ts) (Postgres, Redis, and the API service, all in one
 project). Apply changes with `railway config plan` / `railway config apply` from the repo root.
 
-`python-backend` (the worker) and `mobile-app` are not deployed anywhere yet — the worker needs
-to run somewhere with access to the same Redis/S3/go-backend for the grading pipeline to
-actually process jobs; until then, uploads on the deployed backend will queue but never finish.
+`python-backend` (the worker), `mobile-app`, and `dashboard` are not deployed anywhere yet — the
+worker needs to run somewhere with access to the same Redis/S3/go-backend for the grading
+pipeline to actually process jobs; until then, uploads on the deployed backend will queue but
+never finish. If deploying `dashboard`, add its origin to go-backend's `CORS_ORIGINS`.
 
 ## Repo layout
 
@@ -68,16 +70,17 @@ actually process jobs; until then, uploads on the deployed backend will queue bu
 go-backend/       Go API (Fiber) — auth, Postgres, S3, job queuing
 python-backend/    Python worker — ink extraction & PDF compositing
 mobile-app/        React Native client (students)
-dashboard/         Teacher-facing web dashboard — not built yet (empty directory)
+dashboard/         Teacher-facing web dashboard (React + TanStack Router/Query, Tailwind)
 fixtures/          Sample PDFs/images used for local testing and seeding (gitignored)
 API_CONTRACT.md    Wire contract between go-backend and python-backend
 .railway/          Railway infrastructure-as-code (railway.ts)
 ```
 
-**Note on current state vs. intended audience**: the backend's user model doesn't distinguish
-students from teachers yet — `users.role` is `teacher` or `admin` only, assignments belong to
-whichever account created them (`owner_id`), and the mobile app's scan flow accepts an arbitrary
-student name per submission rather than being tied to the logged-in user's own identity. So
-today, the same kind of account drives both the (unbuilt) dashboard and the mobile app; a real
-student role/identity model is still needed before the two are actually separated the way the
-product intends.
+**Note on current state vs. intended audience**: `users.role` is still `teacher`/`admin` only —
+students aren't a login-capable account type. Teachers now manage a `students` roster and
+`subjects` from the dashboard (a student enrolls in a subject; assignments belong to a subject),
+but the mobile app's scan flow still just posts an arbitrary `student_name` per submission
+rather than authenticating as that student — go-backend auto-links a submission to a roster
+student by matching name (case-insensitive) for the same teacher, but that's a best-effort
+convenience, not real identity. A real student login/identity model is still needed before the
+dashboard and mobile app are actually separated the way the product intends.

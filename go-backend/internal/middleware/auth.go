@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 
 	"gradle-go-backend/internal/auth"
 )
@@ -12,6 +13,13 @@ const (
 	LocalsUserID = "user_id"
 	LocalsRole   = "role"
 )
+
+// UserIDFromContext parses the JWT subject stashed in c.Locals by
+// RequireAuth back into a uuid.UUID for use as a typed GORM query param.
+func UserIDFromContext(c *fiber.Ctx) (uuid.UUID, error) {
+	raw, _ := c.Locals(LocalsUserID).(string)
+	return uuid.Parse(raw)
+}
 
 func RequireAuth(jwtSecret string) fiber.Handler {
 	return func(c *fiber.Ctx) error {

@@ -48,27 +48,29 @@ const (
 )
 
 type Submission struct {
-	ID           uuid.UUID        `json:"id"`
-	AssignmentID uuid.UUID        `json:"assignment_id"`
+	ID           uuid.UUID        `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	AssignmentID uuid.UUID        `json:"assignment_id" gorm:"type:uuid"`
+	StudentID    *uuid.UUID       `json:"student_id,omitempty" gorm:"type:uuid"`
 	StudentName  string           `json:"student_name"`
 	Status       SubmissionStatus `json:"status"`
 	CreatedAt    time.Time        `json:"created_at"`
 }
 
 type SubmissionPage struct {
-	ID           uuid.UUID `json:"id"`
-	SubmissionID uuid.UUID `json:"submission_id"`
+	ID           uuid.UUID `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	SubmissionID uuid.UUID `json:"submission_id" gorm:"type:uuid"`
 	PageNumber   int       `json:"page_number"`
 	RawImagePath string    `json:"raw_image_path"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 
 type AnswerRegion struct {
-	ID               uuid.UUID          `json:"id"`
-	SubmissionID     uuid.UUID          `json:"submission_id"`
-	QuestionID       uuid.UUID          `json:"question_id"`
-	QuestionNumber   int                `json:"question_number"`
-	SourcePageID     uuid.UUID          `json:"source_page_id"`
+	ID               uuid.UUID          `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	SubmissionID     uuid.UUID          `json:"submission_id" gorm:"type:uuid"`
+	QuestionID       uuid.UUID          `json:"question_id" gorm:"type:uuid"`
+	Question         *Question          `json:"-" gorm:"foreignKey:QuestionID"`
+	QuestionNumber   int                `json:"question_number" gorm:"-"`
+	SourcePageID     uuid.UUID          `json:"source_page_id" gorm:"type:uuid"`
 	Status           AnswerRegionStatus `json:"status"`
 	CropX            float64            `json:"crop_x"`
 	CropY            float64            `json:"crop_y"`
@@ -80,8 +82,8 @@ type AnswerRegion struct {
 }
 
 type CompositedDocument struct {
-	ID           uuid.UUID                `json:"id"`
-	SubmissionID uuid.UUID                `json:"submission_id"`
+	ID           uuid.UUID                `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	SubmissionID uuid.UUID                `json:"submission_id" gorm:"type:uuid"`
 	Version      int                      `json:"version"`
 	Status       CompositedDocumentStatus `json:"status"`
 	FilePath     *string                  `json:"file_path,omitempty"`
@@ -90,12 +92,22 @@ type CompositedDocument struct {
 }
 
 type CompositedDocumentPage struct {
-	ID                   uuid.UUID          `json:"id"`
-	CompositedDocumentID uuid.UUID          `json:"composited_document_id"`
+	ID                   uuid.UUID          `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	CompositedDocumentID uuid.UUID          `json:"composited_document_id" gorm:"type:uuid"`
 	PageNumber           int                `json:"page_number"`
 	PageType             CompositedPageType `json:"page_type"`
-	QuestionID           *uuid.UUID         `json:"question_id,omitempty"`
+	QuestionID           *uuid.UUID         `json:"question_id,omitempty" gorm:"type:uuid"`
 	CreatedAt            time.Time          `json:"created_at"`
+}
+
+type ProcessingJob struct {
+	ID           uuid.UUID `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	JobType      JobType   `json:"job_type"`
+	ReferenceID  uuid.UUID `json:"reference_id" gorm:"type:uuid"`
+	Status       string    `json:"status"`
+	ErrorMessage *string   `json:"error_message,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type SubmissionSummary struct {

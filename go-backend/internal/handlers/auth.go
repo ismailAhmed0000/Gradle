@@ -1,28 +1,27 @@
 package handlers
 
 import (
-	"context"
 	"errors"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/gorm"
 
 	"gradle-go-backend/internal/auth"
 	"gradle-go-backend/internal/config"
+	"gradle-go-backend/internal/middleware"
 	"gradle-go-backend/internal/models"
 )
 
 const pgUniqueViolation = "23505"
 
 type AuthHandler struct {
-	DB     *pgxpool.Pool
+	DB     *gorm.DB
 	Config *config.Config
 }
 
-func NewAuthHandler(db *pgxpool.Pool, cfg *config.Config) *AuthHandler {
+func NewAuthHandler(db *gorm.DB, cfg *config.Config) *AuthHandler {
 	return &AuthHandler{DB: db, Config: cfg}
 }
 
@@ -60,15 +59,12 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to process password")
 	}
 
-	var user models.User
-	err = h.DB.QueryRow(
-		c.Context(),
-		`INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3)
-		 RETURNING id, email, role, created_at`,
-		req.Email, passwordHash, models.RoleTeacher,
-	).Scan(&user.ID, &user.Email, &user.Role, &user.CreatedAt)
-
-	if err != nil {
+	user := models.User{
+		Email:        req.Email,
+		PasswordHash: passwordHash,
+		Role:         models.RoleTeacher,
+	}
+	if err := h.DB.Create(&user).Error; err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
 			return fiber.NewError(fiber.StatusConflict, "an account with this email already exists")
@@ -94,21 +90,15 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	const invalidCredentialsMsg = "invalid email or password"
 
 	var user models.User
-	var passwordHash string
-	err := h.DB.QueryRow(
-		c.Context(),
-		`SELECT id, email, password_hash, role, created_at FROM users WHERE email = $1`,
-		req.Email,
-	).Scan(&user.ID, &user.Email, &passwordHash, &user.Role, &user.CreatedAt)
-
+	err := h.DB.Where("email = ?", req.Email).First(&user).Error
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fiber.NewError(fiber.StatusUnauthorized, invalidCredentialsMsg)
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up account")
 	}
 
-	if !auth.CheckPassword(passwordHash, req.Password) {
+	if !auth.CheckPassword(user.PasswordHash, req.Password) {
 		return fiber.NewError(fiber.StatusUnauthorized, invalidCredentialsMsg)
 	}
 
@@ -121,17 +111,14 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 }
 
 func (h *AuthHandler) Me(c *fiber.Ctx) error {
-	userID := c.Locals("user_id")
+	userID, err := middleware.UserIDFromContext(c)
+	if err != nil {
+		return fiber.NewError(fiber.StatusUnauthorized, "invalid token")
+	}
 
 	var user models.User
-	err := h.DB.QueryRow(
-		context.Background(),
-		`SELECT id, email, role, created_at FROM users WHERE id = $1`,
-		userID,
-	).Scan(&user.ID, &user.Email, &user.Role, &user.CreatedAt)
-
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	if err := h.DB.First(&user, "id = ?", userID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fiber.NewError(fiber.StatusNotFound, "account not found")
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up account")

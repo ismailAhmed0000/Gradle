@@ -2,6 +2,7 @@ package router
 
 import (
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
 
 	"gradle-go-backend/internal/config"
 	"gradle-go-backend/internal/handlers"
@@ -14,9 +15,17 @@ type Handlers struct {
 	Submissions *handlers.SubmissionHandler
 	Internal    *handlers.InternalHandler
 	Dashboard   *handlers.DashboardHandler
+	Subjects    *handlers.SubjectHandler
+	Students    *handlers.StudentHandler
 }
 
 func Setup(app *fiber.App, h *Handlers, cfg *config.Config) {
+	app.Use(cors.New(cors.Config{
+		AllowOrigins: cfg.CORSOrigins,
+		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
+		AllowMethods: "GET, POST, PATCH, DELETE, OPTIONS",
+	}))
+
 	app.Get("/healthz", func(c *fiber.Ctx) error {
 		return c.SendStatus(fiber.StatusOK)
 	})
@@ -34,6 +43,7 @@ func Setup(app *fiber.App, h *Handlers, cfg *config.Config) {
 
 	assignmentsGroup := api.Group("/assignments", requireAuth)
 	assignmentsGroup.Get("/", h.Assignments.List)
+	assignmentsGroup.Post("/", h.Assignments.Create)
 	assignmentsGroup.Get("/:id", h.Assignments.GetByID)
 	assignmentsGroup.Get("/:id/submissions", h.Submissions.ListForAssignment)
 	assignmentsGroup.Post("/:id/submissions", h.Submissions.Create)
@@ -42,6 +52,16 @@ func Setup(app *fiber.App, h *Handlers, cfg *config.Config) {
 	submissionsGroup.Get("/:id", h.Submissions.Get)
 	submissionsGroup.Post("/:id/pages", h.Submissions.UploadPage)
 	submissionsGroup.Get("/:id/composited", h.Submissions.GetComposited)
+
+	subjectsGroup := api.Group("/subjects", requireAuth)
+	subjectsGroup.Get("/", h.Subjects.List)
+	subjectsGroup.Post("/", h.Subjects.Create)
+
+	studentsGroup := api.Group("/students", requireAuth)
+	studentsGroup.Get("/", h.Students.List)
+	studentsGroup.Post("/", h.Students.Create)
+	studentsGroup.Get("/:id", h.Students.Get)
+	studentsGroup.Post("/:id/enroll", h.Students.Enroll)
 
 	requireInternalToken := middleware.RequireInternalToken(cfg.InternalAPIToken)
 

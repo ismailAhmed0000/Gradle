@@ -1,14 +1,12 @@
 package handlers
 
 import (
-	"context"
 	"errors"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/gorm"
 
 	"gradle-go-backend/internal/middleware"
 	"gradle-go-backend/internal/models"
@@ -18,49 +16,58 @@ import (
 const assignmentFileURLExpiry = 15 * time.Minute
 
 type AssignmentHandler struct {
-	DB      *pgxpool.Pool
+	DB      *gorm.DB
 	Storage *storage.S3Storage
 }
 
-func NewAssignmentHandler(db *pgxpool.Pool, s *storage.S3Storage) *AssignmentHandler {
+func NewAssignmentHandler(db *gorm.DB, s *storage.S3Storage) *AssignmentHandler {
 	return &AssignmentHandler{DB: db, Storage: s}
 }
 
 func (h *AssignmentHandler) List(c *fiber.Ctx) error {
-	ownerID := c.Locals(middleware.LocalsUserID)
-
-	rows, err := h.DB.Query(
-		c.Context(),
-		`SELECT a.id, a.owner_id, a.title, a.subject, a.due_date, a.created_at, latest.status
-		 FROM assignments a
-		 LEFT JOIN LATERAL (
-		     SELECT s.status FROM submissions s
-		     WHERE s.assignment_id = a.id
-		     ORDER BY s.created_at DESC LIMIT 1
-		 ) latest ON true
-		 WHERE a.owner_id = $1 ORDER BY a.created_at DESC`,
-		ownerID,
-	)
+	ownerID, err := middleware.UserIDFromContext(c)
 	if err != nil {
+		return fiber.NewError(fiber.StatusUnauthorized, "invalid token")
+	}
+
+	var assignments []models.Assignment
+	if err := h.DB.Preload("Subject").
+		Where("owner_id = ?", ownerID).
+		Order("created_at DESC").
+		Find(&assignments).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to list assignments")
 	}
-	defer rows.Close()
 
-	assignments := []models.Assignment{}
-	for rows.Next() {
-		var a models.Assignment
-		var latestSubmissionStatus *string
-		if err := rows.Scan(&a.ID, &a.OwnerID, &a.Title, &a.Subject, &a.DueDate, &a.CreatedAt, &latestSubmissionStatus); err != nil {
+	for i := range assignments {
+		if err := h.attachComputedFields(&assignments[i]); err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "failed to read assignments")
 		}
-		a.Status = computeAssignmentStatus(a.DueDate, latestSubmissionStatus)
-		assignments = append(assignments, a)
-	}
-	if err := rows.Err(); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "failed to read assignments")
 	}
 
 	return c.JSON(assignments)
+}
+
+// attachComputedFields fills in the fields that don't live in the
+// assignments table itself: the joined subject name, and the status derived
+// from the due date + the most recently created submission.
+func (h *AssignmentHandler) attachComputedFields(a *models.Assignment) error {
+	if a.Subject != nil {
+		a.SubjectName = &a.Subject.Name
+	}
+
+	var latest models.Submission
+	err := h.DB.Where("assignment_id = ?", a.ID).Order("created_at DESC").First(&latest).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	var latestStatus *string
+	if err == nil {
+		s := string(latest.Status)
+		latestStatus = &s
+	}
+	a.Status = computeAssignmentStatus(a.DueDate, latestStatus)
+	return nil
 }
 
 // computeAssignmentStatus derives a single status for an assignment from the
@@ -79,49 +86,89 @@ func computeAssignmentStatus(dueDate *time.Time, latestSubmissionStatus *string)
 	return models.AssignmentStatusPending
 }
 
+type createAssignmentRequest struct {
+	Title     string     `json:"title"`
+	SubjectID uuid.UUID  `json:"subject_id"`
+	DueDate   *time.Time `json:"due_date"`
+}
+
+func (h *AssignmentHandler) Create(c *fiber.Ctx) error {
+	ownerID, err := middleware.UserIDFromContext(c)
+	if err != nil {
+		return fiber.NewError(fiber.StatusUnauthorized, "invalid token")
+	}
+
+	var req createAssignmentRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+	}
+	if req.Title == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "title is required")
+	}
+	if req.SubjectID == uuid.Nil {
+		return fiber.NewError(fiber.StatusBadRequest, "subject_id is required")
+	}
+
+	var subject models.Subject
+	if err := h.DB.Where("id = ? AND owner_id = ?", req.SubjectID, ownerID).First(&subject).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fiber.NewError(fiber.StatusBadRequest, "subject not found")
+		}
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up subject")
+	}
+
+	a := models.Assignment{
+		OwnerID:   ownerID,
+		Title:     req.Title,
+		SubjectID: &req.SubjectID,
+		DueDate:   req.DueDate,
+	}
+	if err := h.DB.Create(&a).Error; err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to create assignment")
+	}
+
+	a.SubjectName = &subject.Name
+	a.Status = computeAssignmentStatus(a.DueDate, nil)
+
+	return c.Status(fiber.StatusCreated).JSON(a)
+}
+
 func (h *AssignmentHandler) GetByID(c *fiber.Ctx) error {
-	ownerID := c.Locals(middleware.LocalsUserID)
+	ownerID, err := middleware.UserIDFromContext(c)
+	if err != nil {
+		return fiber.NewError(fiber.StatusUnauthorized, "invalid token")
+	}
 
 	assignmentID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid assignment id")
 	}
 
-	var detail models.AssignmentDetail
-	err = h.DB.QueryRow(
-		c.Context(),
-		`SELECT a.id, a.owner_id, a.title, a.subject, a.due_date, a.created_at, u.email
-		 FROM assignments a JOIN users u ON u.id = a.owner_id
-		 WHERE a.id = $1 AND a.owner_id = $2`,
-		assignmentID, ownerID,
-	).Scan(
-		&detail.ID, &detail.OwnerID, &detail.Title, &detail.Subject, &detail.DueDate, &detail.CreatedAt,
-		&detail.TeacherEmail,
-	)
+	var assignment models.Assignment
+	err = h.DB.Preload("Subject").Preload("Owner").
+		Where("id = ? AND owner_id = ?", assignmentID, ownerID).
+		First(&assignment).Error
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fiber.NewError(fiber.StatusNotFound, "assignment not found")
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up assignment")
 	}
-
-	var latestSubmissionStatus *string
-	err = h.DB.QueryRow(
-		c.Context(),
-		`SELECT status FROM submissions WHERE assignment_id = $1 ORDER BY created_at DESC LIMIT 1`,
-		assignmentID,
-	).Scan(&latestSubmissionStatus)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	if err := h.attachComputedFields(&assignment); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up submission status")
 	}
-	detail.Status = computeAssignmentStatus(detail.DueDate, latestSubmissionStatus)
 
-	detail.Questions, err = h.listQuestions(c.Context(), assignmentID)
+	detail := models.AssignmentDetail{Assignment: assignment}
+	if assignment.Owner != nil {
+		detail.TeacherEmail = assignment.Owner.Email
+	}
+
+	detail.Questions, err = h.listQuestions(assignmentID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to load questions")
 	}
 
-	detail.AssignmentFiles, err = h.listAssignmentFiles(c.Context(), assignmentID)
+	detail.AssignmentFiles, err = h.listAssignmentFiles(c, assignmentID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to load assignment files")
 	}
@@ -129,59 +176,24 @@ func (h *AssignmentHandler) GetByID(c *fiber.Ctx) error {
 	return c.JSON(detail)
 }
 
-func (h *AssignmentHandler) listQuestions(ctx context.Context, assignmentID uuid.UUID) ([]models.Question, error) {
-	rows, err := h.DB.Query(
-		ctx,
-		`SELECT id, assignment_id, assignment_file_id, question_number, has_defined_region,
-		        page_number, region_x, region_y, region_width, region_height, created_at
-		 FROM questions WHERE assignment_id = $1 ORDER BY question_number ASC`,
-		assignmentID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
+func (h *AssignmentHandler) listQuestions(assignmentID uuid.UUID) ([]models.Question, error) {
 	questions := []models.Question{}
-	for rows.Next() {
-		var q models.Question
-		if err := rows.Scan(
-			&q.ID, &q.AssignmentID, &q.AssignmentFileID, &q.QuestionNumber, &q.HasDefinedRegion,
-			&q.PageNumber, &q.RegionX, &q.RegionY, &q.RegionWidth, &q.RegionHeight, &q.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		questions = append(questions, q)
-	}
-	return questions, rows.Err()
+	err := h.DB.Where("assignment_id = ?", assignmentID).
+		Order("question_number ASC").
+		Find(&questions).Error
+	return questions, err
 }
 
-func (h *AssignmentHandler) listAssignmentFiles(ctx context.Context, assignmentID uuid.UUID) ([]models.AssignmentFile, error) {
-	rows, err := h.DB.Query(
-		ctx,
-		`SELECT id, assignment_id, file_path, page_count, created_at
-		 FROM assignment_files WHERE assignment_id = $1 ORDER BY created_at ASC`,
-		assignmentID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
+func (h *AssignmentHandler) listAssignmentFiles(c *fiber.Ctx, assignmentID uuid.UUID) ([]models.AssignmentFile, error) {
 	files := []models.AssignmentFile{}
-	for rows.Next() {
-		var f models.AssignmentFile
-		if err := rows.Scan(&f.ID, &f.AssignmentID, &f.FilePath, &f.PageCount, &f.CreatedAt); err != nil {
-			return nil, err
-		}
-		files = append(files, f)
-	}
-	if err := rows.Err(); err != nil {
+	if err := h.DB.Where("assignment_id = ?", assignmentID).
+		Order("created_at ASC").
+		Find(&files).Error; err != nil {
 		return nil, err
 	}
 
 	for i := range files {
-		url, err := h.Storage.PresignedGetURL(ctx, files[i].FilePath, assignmentFileURLExpiry)
+		url, err := h.Storage.PresignedGetURL(c.Context(), files[i].FilePath, assignmentFileURLExpiry)
 		if err != nil {
 			return nil, err
 		}
