@@ -17,6 +17,7 @@ type Handlers struct {
 	Dashboard   *handlers.DashboardHandler
 	Subjects    *handlers.SubjectHandler
 	Students    *handlers.StudentHandler
+	Google      *handlers.GoogleIntegrationHandler
 }
 
 func Setup(app *fiber.App, h *Handlers, cfg *config.Config) {
@@ -53,11 +54,22 @@ func Setup(app *fiber.App, h *Handlers, cfg *config.Config) {
 	submissionsGroup.Get("/:id", h.Submissions.Get)
 	submissionsGroup.Post("/:id/pages", h.Submissions.UploadPage)
 	submissionsGroup.Get("/:id/composited", h.Submissions.GetComposited)
+	submissionsGroup.Patch("/:id/grade", h.Submissions.Grade)
 
 	subjectsGroup := api.Group("/subjects", requireAuth)
 	subjectsGroup.Get("/", h.Subjects.List)
 	subjectsGroup.Post("/", h.Subjects.Create)
 	subjectsGroup.Get("/:id", h.Subjects.GetByID)
+
+	googleGroup := api.Group("/integrations/google")
+	googleGroup.Get("/callback", h.Google.Callback)
+	googleGroup.Get("/student/auth-url", h.Google.StudentAuthURL)
+	googleGroup.Get("/teacher/auth-url", requireAuth, h.Google.TeacherAuthURL)
+	googleGroup.Get("/status", requireAuth, h.Google.Status)
+	googleGroup.Delete("/", requireAuth, h.Google.Disconnect)
+	googleGroup.Get("/courses", requireAuth, h.Google.Courses)
+	googleGroup.Get("/courses/:id/coursework", requireAuth, h.Google.CourseWork)
+	googleGroup.Post("/import", requireAuth, h.Google.Import)
 
 	requireAdmin := middleware.RequireAdmin()
 

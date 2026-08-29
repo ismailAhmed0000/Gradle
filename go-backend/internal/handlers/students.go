@@ -56,6 +56,22 @@ func (h *StudentHandler) List(c *fiber.Ctx) error {
 	return c.JSON(summaries)
 }
 
+// studentForUser resolves the roster row linked to a logged-in student
+// account. Returns (nil, nil) if no teacher's roster import has matched this
+// student's email yet — not an error, since a brand-new Google sign-in is a
+// valid state (they just can't see any assignments until that happens).
+func studentForUser(db *gorm.DB, userID uuid.UUID) (*models.Student, error) {
+	var student models.Student
+	err := db.Where("user_id = ?", userID).First(&student).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &student, nil
+}
+
 // teacherScope returns nil for an admin (no ownership restriction) or the
 // requesting user's id for a teacher (restricted to their own subjects).
 func teacherScope(c *fiber.Ctx, userID uuid.UUID) *uuid.UUID {

@@ -1,23 +1,31 @@
 package handlers
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"log"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"gradle-go-backend/internal/config"
+	"gradle-go-backend/internal/googleclassroom"
 	"gradle-go-backend/internal/models"
 	"gradle-go-backend/internal/queue"
+	"gradle-go-backend/internal/storage"
 )
 
 type InternalHandler struct {
-	DB    *gorm.DB
-	Queue *queue.JobQueue
+	DB      *gorm.DB
+	Queue   *queue.JobQueue
+	Config  *config.Config
+	Storage *storage.S3Storage
 }
 
-func NewInternalHandler(db *gorm.DB, q *queue.JobQueue) *InternalHandler {
-	return &InternalHandler{DB: db, Queue: q}
+func NewInternalHandler(db *gorm.DB, q *queue.JobQueue, cfg *config.Config, s *storage.S3Storage) *InternalHandler {
+	return &InternalHandler{DB: db, Queue: q, Config: cfg, Storage: s}
 }
 
 func (h *InternalHandler) AnswerRegionContext(c *fiber.Ctx) error {
@@ -375,6 +383,9 @@ func (h *InternalHandler) ReportCompositeResult(c *fiber.Ctx) error {
 			Update("status", "done").Error; err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "failed to update job status")
 		}
+		if req.FilePath != nil {
+			h.maybeTurnInToClassroom(context.Background(), submissionID, *req.FilePath)
+		}
 	case "failed":
 		if err := h.DB.Model(&models.CompositedDocument{}).Where("id = ?", compositedID).Updates(map[string]any{
 			"status":        models.CompositedDocumentStatusFailed,
@@ -397,4 +408,71 @@ func (h *InternalHandler) ReportCompositeResult(c *fiber.Ctx) error {
 	}
 
 	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// maybeTurnInToClassroom pushes a freshly composited answer PDF back into
+// Google Classroom as the student's turned-in work, when: the assignment
+// was imported from Classroom, the submission is tied to a roster student,
+// and that student has signed in with Google (so Gradle holds their own
+// consent to submit on their behalf — a teacher's grant can't do this).
+// Best-effort: failures are logged, not surfaced, since the grading
+// pipeline itself already succeeded.
+func (h *InternalHandler) maybeTurnInToClassroom(ctx context.Context, submissionID uuid.UUID, compositedFilePath string) {
+	var submission models.Submission
+	if err := h.DB.First(&submission, "id = ?", submissionID).Error; err != nil || submission.StudentID == nil {
+		return
+	}
+
+	var assignment models.Assignment
+	if err := h.DB.First(&assignment, "id = ?", submission.AssignmentID).Error; err != nil {
+		return
+	}
+	if assignment.Source != models.AssignmentSourceClassroom || assignment.ExternalID == nil || assignment.ExternalCourseID == nil {
+		return
+	}
+
+	var student models.Student
+	if err := h.DB.First(&student, "id = ?", *submission.StudentID).Error; err != nil || student.UserID == nil {
+		return
+	}
+
+	httpClient, err := googleclassroom.HTTPClientFor(ctx, h.DB, h.Config, *student.UserID, googleclassroom.FlowStudentLogin)
+	if err != nil {
+		log.Printf("classroom turn-in skipped for submission %s: %v", submissionID, err)
+		return
+	}
+	client, err := googleclassroom.NewClient(ctx, httpClient)
+	if err != nil {
+		log.Printf("classroom turn-in: building client failed for submission %s: %v", submissionID, err)
+		return
+	}
+
+	gcSubmission, err := client.FindOwnSubmission(ctx, *assignment.ExternalCourseID, *assignment.ExternalID)
+	if err != nil {
+		log.Printf("classroom turn-in: no matching submission for %s: %v", submissionID, err)
+		return
+	}
+
+	data, err := h.Storage.GetObject(ctx, compositedFilePath)
+	if err != nil {
+		log.Printf("classroom turn-in: failed to fetch composited pdf for %s: %v", submissionID, err)
+		return
+	}
+
+	driveFileID, err := client.UploadDriveFile(ctx, fmt.Sprintf("%s - answers.pdf", assignment.Title), "application/pdf", data)
+	if err != nil {
+		log.Printf("classroom turn-in: drive upload failed for %s: %v", submissionID, err)
+		return
+	}
+
+	if err := client.TurnInWithAttachment(ctx, *assignment.ExternalCourseID, *assignment.ExternalID, gcSubmission.Id, driveFileID); err != nil {
+		log.Printf("classroom turn-in failed for %s: %v", submissionID, err)
+		return
+	}
+
+	if err := h.DB.Model(&models.Submission{}).
+		Where("id = ?", submissionID).
+		Update("external_submission_id", gcSubmission.Id).Error; err != nil {
+		log.Printf("classroom turn-in: failed to record external submission id for %s: %v", submissionID, err)
+	}
 }

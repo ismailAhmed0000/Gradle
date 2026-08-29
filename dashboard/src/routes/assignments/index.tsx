@@ -159,13 +159,21 @@ function AssignmentsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Assignments</h1>
-        <button
-          type="button"
-          onClick={() => setShowPanel(true)}
-          className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500"
-        >
-          New assignment
-        </button>
+        <div className="flex gap-2">
+          <Link
+            to="/assignments/import"
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          >
+            Import from Classroom
+          </Link>
+          <button
+            type="button"
+            onClick={() => setShowPanel(true)}
+            className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+          >
+            New assignment
+          </button>
+        </div>
       </div>
 
       <NewAssignmentPanel open={showPanel} onClose={() => setShowPanel(false)} />
@@ -199,6 +207,9 @@ function AssignmentsPage() {
                     >
                       {assignment.title}
                     </Link>
+                    {assignment.source === 'classroom' && (
+                      <span className="ml-2 text-xs text-slate-400">(Classroom)</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-slate-600">
                     {assignment.subject_name ?? '—'}

@@ -15,17 +15,25 @@ const (
 	AssignmentStatusGraded    AssignmentStatus = "graded"
 )
 
+const (
+	AssignmentSourceManual    = "manual"
+	AssignmentSourceClassroom = "classroom"
+)
+
 type Assignment struct {
-	ID          uuid.UUID        `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	OwnerID     uuid.UUID        `json:"owner_id" gorm:"type:uuid"`
-	Owner       *User            `json:"-" gorm:"foreignKey:OwnerID"`
-	Title       string           `json:"title"`
-	SubjectID   *uuid.UUID       `json:"subject_id,omitempty" gorm:"type:uuid"`
-	Subject     *Subject         `json:"-" gorm:"foreignKey:SubjectID"`
-	SubjectName *string          `json:"subject_name,omitempty" gorm:"-"`
-	DueDate     *time.Time       `json:"due_date,omitempty"`
-	Status      AssignmentStatus `json:"status" gorm:"-"`
-	CreatedAt   time.Time        `json:"created_at"`
+	ID               uuid.UUID        `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	OwnerID          uuid.UUID        `json:"owner_id" gorm:"type:uuid"`
+	Owner            *User            `json:"-" gorm:"foreignKey:OwnerID"`
+	Title            string           `json:"title"`
+	SubjectID        *uuid.UUID       `json:"subject_id,omitempty" gorm:"type:uuid"`
+	Subject          *Subject         `json:"-" gorm:"foreignKey:SubjectID"`
+	SubjectName      *string          `json:"subject_name,omitempty" gorm:"-"`
+	DueDate          *time.Time       `json:"due_date,omitempty"`
+	Status           AssignmentStatus `json:"status" gorm:"-"`
+	Source           string           `json:"source"`
+	ExternalID       *string          `json:"external_id,omitempty"`
+	ExternalCourseID *string          `json:"external_course_id,omitempty"`
+	CreatedAt        time.Time        `json:"created_at"`
 }
 
 type AssignmentFile struct {

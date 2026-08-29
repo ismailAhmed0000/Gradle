@@ -1,5 +1,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
+import { useState } from 'react'
 import { useSubmission, useSubmissionComposited } from '../../features/submissions/api'
+import { useGradeSubmission } from '../../features/submissions/grade'
 import { Badge } from '../../components/Badge'
 import { requireAuth } from '../../lib/guards'
 
@@ -7,6 +9,68 @@ export const Route = createFileRoute('/submissions/$submissionId')({
   beforeLoad: requireAuth,
   component: SubmissionDetailPage,
 })
+
+function GradePanel({
+  submissionId,
+  grade,
+  feedback,
+}: {
+  submissionId: string
+  grade: string | null | undefined
+  feedback: string | null | undefined
+}) {
+  const gradeSubmission = useGradeSubmission(submissionId)
+  const [gradeInput, setGradeInput] = useState(grade ?? '')
+  const [feedbackInput, setFeedbackInput] = useState(feedback ?? '')
+
+  function handleSave(e: React.FormEvent) {
+    e.preventDefault()
+    gradeSubmission.mutate({
+      grade: gradeInput.trim() === '' ? null : gradeInput.trim(),
+      feedback: feedbackInput.trim() === '' ? null : feedbackInput.trim(),
+    })
+  }
+
+  const syncError = gradeSubmission.data?.classroom_sync_error
+
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
+      <h2 className="mb-3 text-sm font-medium text-slate-700">Mark</h2>
+      <form onSubmit={handleSave} className="flex flex-col gap-3 sm:flex-row sm:items-start">
+        <input
+          value={gradeInput}
+          onChange={(e) => setGradeInput(e.target.value)}
+          placeholder="Grade (e.g. 8 or A-)"
+          className="w-40 rounded-md border border-slate-300 px-3 py-2 text-sm"
+        />
+        <input
+          value={feedbackInput}
+          onChange={(e) => setFeedbackInput(e.target.value)}
+          placeholder="Feedback (optional)"
+          className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+        />
+        <button
+          type="submit"
+          disabled={gradeSubmission.isPending}
+          className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+        >
+          {gradeSubmission.isPending ? 'Saving…' : 'Save'}
+        </button>
+      </form>
+      {gradeSubmission.isError && (
+        <p className="mt-2 text-sm text-red-600">{gradeSubmission.error.message}</p>
+      )}
+      {syncError && (
+        <p className="mt-2 text-sm text-amber-600">
+          Saved in Gradle, but couldn't sync to Google Classroom: {syncError}
+        </p>
+      )}
+      {gradeSubmission.isSuccess && !syncError && (
+        <p className="mt-2 text-sm text-emerald-600">Saved.</p>
+      )}
+    </section>
+  )
+}
 
 function SubmissionDetailPage() {
   const { submissionId } = Route.useParams()
@@ -35,6 +99,11 @@ function SubmissionDetailPage() {
         <div className="mt-2 flex items-center gap-3">
           <h1 className="text-2xl font-semibold">{s.student_name}</h1>
           <Badge status={s.status} />
+          {s.grade && (
+            <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+              Grade: {s.grade}
+            </span>
+          )}
         </div>
       </div>
 
@@ -57,6 +126,8 @@ function SubmissionDetailPage() {
           )}
         </section>
       )}
+
+      <GradePanel submissionId={submissionId} grade={s.grade} feedback={s.feedback} />
 
       <section>
         <h2 className="mb-3 text-sm font-medium text-slate-700">

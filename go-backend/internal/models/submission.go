@@ -48,12 +48,15 @@ const (
 )
 
 type Submission struct {
-	ID           uuid.UUID        `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	AssignmentID uuid.UUID        `json:"assignment_id" gorm:"type:uuid"`
-	StudentID    *uuid.UUID       `json:"student_id,omitempty" gorm:"type:uuid"`
-	StudentName  string           `json:"student_name"`
-	Status       SubmissionStatus `json:"status"`
-	CreatedAt    time.Time        `json:"created_at"`
+	ID                   uuid.UUID        `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	AssignmentID         uuid.UUID        `json:"assignment_id" gorm:"type:uuid"`
+	StudentID            *uuid.UUID       `json:"student_id,omitempty" gorm:"type:uuid"`
+	StudentName          string           `json:"student_name"`
+	Status               SubmissionStatus `json:"status"`
+	Grade                *string          `json:"grade,omitempty"`
+	Feedback             *string          `json:"feedback,omitempty"`
+	ExternalSubmissionID *string          `json:"-"`
+	CreatedAt            time.Time        `json:"created_at"`
 }
 
 type SubmissionPage struct {

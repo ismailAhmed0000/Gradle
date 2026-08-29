@@ -1,6 +1,6 @@
 import { apiClient } from './client';
 
-export type Role = 'teacher' | 'admin';
+export type Role = 'teacher' | 'admin' | 'student';
 
 export type User = {
   id: string;
@@ -34,6 +34,21 @@ export async function registerRequest(
     password,
   });
   return response.data;
+}
+
+// GRADLE_AUTH_REDIRECT is the app's registered deep link scheme (see
+// ios/MobileApp/Info.plist and android's AndroidManifest.xml) — Google never
+// sees this directly, only the backend's own HTTPS callback does; the
+// backend redirects here as its very last step once it has issued a Gradle
+// JWT for the signed-in student.
+export const GOOGLE_AUTH_REDIRECT = 'gradleapp://auth-callback';
+
+export async function fetchGoogleSignInUrl(): Promise<string> {
+  const response = await apiClient.get<{ url: string }>(
+    '/api/integrations/google/student/auth-url',
+    { params: { redirect_uri: GOOGLE_AUTH_REDIRECT } },
+  );
+  return response.data.url;
 }
 
 export async function fetchCurrentUser(token: string): Promise<User> {

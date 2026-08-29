@@ -14,6 +14,7 @@ type AuthContextValue = {
   isBootstrapping: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
+  loginWithToken: (token: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -58,6 +59,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(response.user);
   }
 
+  // Used after the Google sign-in deep link hands back a Gradle JWT the
+  // backend already issued — no credentials to post, just adopt the token.
+  async function loginWithToken(newToken: string) {
+    const currentUser = await fetchCurrentUser(newToken);
+    await AsyncStorage.setItem(TOKEN_STORAGE_KEY, newToken);
+    setToken(newToken);
+    setUser(currentUser);
+  }
+
   async function logout() {
     await AsyncStorage.removeItem(TOKEN_STORAGE_KEY);
     setToken(null);
@@ -65,7 +75,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const value = useMemo(
-    () => ({ user, token, isBootstrapping, login, register, logout }),
+    () => ({ user, token, isBootstrapping, login, register, loginWithToken, logout }),
     [user, token, isBootstrapping],
   );
 

@@ -1,7 +1,13 @@
 import './global.css';
 
-import { useState } from 'react';
-import { StatusBar, StyleSheet, useColorScheme, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  Linking,
+  StatusBar,
+  StyleSheet,
+  useColorScheme,
+  View,
+} from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NavigationContainer } from '@react-navigation/native';
@@ -31,8 +37,30 @@ function App() {
 }
 
 function AppContent() {
-  const { user, isBootstrapping } = useAuth();
+  const { user, isBootstrapping, loginWithToken } = useAuth();
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+
+  // Handles the redirect back from the system browser once a student
+  // approves Google sign-in (gradleapp://auth-callback?token=...), both for
+  // a cold start (app was closed) and while already running.
+  useEffect(() => {
+    function handleUrl(url: string) {
+      // Avoid relying on the URL global for a custom (non-http) scheme —
+      // just pull the token param out with a regex instead.
+      const match = url.match(/[?&]token=([^&]+)/);
+      if (match) {
+        loginWithToken(decodeURIComponent(match[1])).catch(() => {});
+      }
+    }
+
+    Linking.getInitialURL().then(url => {
+      if (url) handleUrl(url);
+    });
+    const subscription = Linking.addEventListener('url', ({ url }) =>
+      handleUrl(url),
+    );
+    return () => subscription.remove();
+  }, [loginWithToken]);
 
   if (isBootstrapping) return <SplashScreen />;
   if (!user) {

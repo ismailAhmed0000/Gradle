@@ -46,11 +46,12 @@ func main() {
 	h := &router.Handlers{
 		Auth:        handlers.NewAuthHandler(gormDB, cfg),
 		Assignments: handlers.NewAssignmentHandler(gormDB, s3),
-		Submissions: handlers.NewSubmissionHandler(gormDB, s3, jobQueue),
-		Internal:    handlers.NewInternalHandler(gormDB, jobQueue),
+		Submissions: handlers.NewSubmissionHandler(gormDB, s3, jobQueue, cfg),
+		Internal:    handlers.NewInternalHandler(gormDB, jobQueue, cfg, s3),
 		Dashboard:   handlers.NewDashboardHandler(gormDB),
 		Subjects:    handlers.NewSubjectHandler(gormDB),
 		Students:    handlers.NewStudentHandler(gormDB),
+		Google:      handlers.NewGoogleIntegrationHandler(gormDB, cfg, s3),
 	}
 	router.Setup(app, h, cfg)
 

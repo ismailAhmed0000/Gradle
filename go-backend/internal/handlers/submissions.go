@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"image"
@@ -17,6 +18,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"gradle-go-backend/internal/config"
+	"gradle-go-backend/internal/googleclassroom"
 	"gradle-go-backend/internal/middleware"
 	"gradle-go-backend/internal/models"
 	"gradle-go-backend/internal/queue"
@@ -29,18 +32,24 @@ type SubmissionHandler struct {
 	DB      *gorm.DB
 	Storage *storage.S3Storage
 	Queue   *queue.JobQueue
+	Config  *config.Config
 }
 
-func NewSubmissionHandler(db *gorm.DB, s *storage.S3Storage, q *queue.JobQueue) *SubmissionHandler {
-	return &SubmissionHandler{DB: db, Storage: s, Queue: q}
+func NewSubmissionHandler(db *gorm.DB, s *storage.S3Storage, q *queue.JobQueue, cfg *config.Config) *SubmissionHandler {
+	return &SubmissionHandler{DB: db, Storage: s, Queue: q, Config: cfg}
 }
 
 type createSubmissionRequest struct {
 	StudentName string `json:"student_name"`
 }
 
+// Create starts (or resumes) an answer submission for an assignment. A
+// teacher/admin types the student's name (the original scan-on-their-behalf
+// flow); a logged-in student instead submits as themselves — their name and
+// student_id come from their own linked roster record, and the assignment
+// must be one their enrollment actually grants them access to.
 func (h *SubmissionHandler) Create(c *fiber.Ctx) error {
-	ownerID, err := middleware.UserIDFromContext(c)
+	userID, err := middleware.UserIDFromContext(c)
 	if err != nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "invalid token")
 	}
@@ -50,41 +59,69 @@ func (h *SubmissionHandler) Create(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid assignment id")
 	}
 
-	var req createSubmissionRequest
-	if err := c.BodyParser(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
-	}
-	if req.StudentName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "student_name is required")
-	}
+	var studentID *uuid.UUID
+	var studentName string
 
-	var assignment models.Assignment
-	if err := h.DB.Select("id").Where("id = ? AND owner_id = ?", assignmentID, ownerID).First(&assignment).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	if middleware.IsStudent(c) {
+		student, err := studentForUser(h.DB, userID)
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "failed to look up student record")
+		}
+		if student == nil {
+			return fiber.NewError(fiber.StatusForbidden, "your account isn't linked to a class roster yet")
+		}
+
+		var enrolled int64
+		if err := h.DB.Table("assignments").
+			Joins("JOIN enrollments ON enrollments.subject_id = assignments.subject_id").
+			Where("assignments.id = ? AND enrollments.student_id = ?", assignmentID, student.ID).
+			Count(&enrolled).Error; err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "failed to look up assignment")
+		}
+		if enrolled == 0 {
 			return fiber.NewError(fiber.StatusNotFound, "assignment not found")
 		}
-		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up assignment")
-	}
 
-	// If the teacher already has a student on their roster with this name,
-	// link the submission to that student record so it shows up on the
-	// student's work page; mobile submitters aren't required to be enrolled.
-	var studentID *uuid.UUID
-	var student models.Student
-	err = h.DB.Where("owner_id = ? AND lower(name) = lower(?)", ownerID, req.StudentName).First(&student).Error
-	switch {
-	case err == nil:
 		studentID = &student.ID
-	case errors.Is(err, gorm.ErrRecordNotFound):
-	default:
-		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up student")
+		studentName = student.Name
+	} else {
+		var req createSubmissionRequest
+		if err := c.BodyParser(&req); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+		}
+		if req.StudentName == "" {
+			return fiber.NewError(fiber.StatusBadRequest, "student_name is required")
+		}
+		studentName = req.StudentName
+
+		var assignment models.Assignment
+		if err := h.DB.Select("id").Where("id = ? AND owner_id = ?", assignmentID, userID).First(&assignment).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fiber.NewError(fiber.StatusNotFound, "assignment not found")
+			}
+			return fiber.NewError(fiber.StatusInternalServerError, "failed to look up assignment")
+		}
+
+		// If the teacher already has a student on their roster with this
+		// name, link the submission to that student record so it shows up
+		// on the student's work page; mobile submitters aren't required to
+		// be enrolled.
+		var student models.Student
+		err = h.DB.Where("owner_id = ? AND lower(name) = lower(?)", userID, req.StudentName).First(&student).Error
+		switch {
+		case err == nil:
+			studentID = &student.ID
+		case errors.Is(err, gorm.ErrRecordNotFound):
+		default:
+			return fiber.NewError(fiber.StatusInternalServerError, "failed to look up student")
+		}
 	}
 
 	// A student has exactly one answer sheet per assignment: re-submitting the
 	// same name resumes their existing submission instead of creating another.
 	s := models.Submission{
 		AssignmentID: assignmentID,
-		StudentName:  req.StudentName,
+		StudentName:  studentName,
 		StudentID:    studentID,
 		Status:       models.SubmissionStatusPending,
 	}
@@ -108,8 +145,11 @@ type createSubmissionResponse struct {
 	PageCount int `json:"page_count"`
 }
 
+// ListForAssignment returns every submission for the assignment, for the
+// owning teacher/admin — or, for a student, just their own (so the mobile
+// app can show scan progress without exposing classmates' work).
 func (h *SubmissionHandler) ListForAssignment(c *fiber.Ctx) error {
-	ownerID, err := middleware.UserIDFromContext(c)
+	userID, err := middleware.UserIDFromContext(c)
 	if err != nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "invalid token")
 	}
@@ -119,16 +159,39 @@ func (h *SubmissionHandler) ListForAssignment(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid assignment id")
 	}
 
-	var assignment models.Assignment
-	if err := h.DB.Select("id").Where("id = ? AND owner_id = ?", assignmentID, ownerID).First(&assignment).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	query := h.DB.Where("assignment_id = ?", assignmentID)
+
+	if middleware.IsStudent(c) {
+		student, err := studentForUser(h.DB, userID)
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "failed to look up student record")
+		}
+		if student == nil {
 			return fiber.NewError(fiber.StatusNotFound, "assignment not found")
 		}
-		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up assignment")
+		var enrolled int64
+		if err := h.DB.Table("assignments").
+			Joins("JOIN enrollments ON enrollments.subject_id = assignments.subject_id").
+			Where("assignments.id = ? AND enrollments.student_id = ?", assignmentID, student.ID).
+			Count(&enrolled).Error; err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "failed to look up assignment")
+		}
+		if enrolled == 0 {
+			return fiber.NewError(fiber.StatusNotFound, "assignment not found")
+		}
+		query = query.Where("student_id = ?", student.ID)
+	} else {
+		var assignment models.Assignment
+		if err := h.DB.Select("id").Where("id = ? AND owner_id = ?", assignmentID, userID).First(&assignment).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fiber.NewError(fiber.StatusNotFound, "assignment not found")
+			}
+			return fiber.NewError(fiber.StatusInternalServerError, "failed to look up assignment")
+		}
 	}
 
 	var subs []models.Submission
-	if err := h.DB.Where("assignment_id = ?", assignmentID).
+	if err := query.
 		Order("created_at DESC").
 		Find(&subs).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to load submissions")
@@ -172,8 +235,32 @@ type uploadPageResponse struct {
 	AnswerRegionsQueued int                   `json:"answer_regions_queued"`
 }
 
+// findAccessibleSubmission scopes a submission lookup to whoever is allowed
+// to touch it: the owning teacher/admin (via the assignment), or — for a
+// student — only a submission that's actually theirs.
+func (h *SubmissionHandler) findAccessibleSubmission(c *fiber.Ctx, userID uuid.UUID, submissionID uuid.UUID) (models.Submission, error) {
+	var submission models.Submission
+	query := h.DB.Where("submissions.id = ?", submissionID)
+	if middleware.IsStudent(c) {
+		student, err := studentForUser(h.DB, userID)
+		if err != nil {
+			return submission, err
+		}
+		if student == nil {
+			return submission, gorm.ErrRecordNotFound
+		}
+		query = query.Where("submissions.student_id = ?", student.ID)
+	} else {
+		query = query.
+			Joins("JOIN assignments ON assignments.id = submissions.assignment_id").
+			Where("assignments.owner_id = ?", userID)
+	}
+	err := query.First(&submission).Error
+	return submission, err
+}
+
 func (h *SubmissionHandler) UploadPage(c *fiber.Ctx) error {
-	ownerID, err := middleware.UserIDFromContext(c)
+	userID, err := middleware.UserIDFromContext(c)
 	if err != nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "invalid token")
 	}
@@ -193,10 +280,7 @@ func (h *SubmissionHandler) UploadPage(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "page file is required")
 	}
 
-	var submission models.Submission
-	err = h.DB.Joins("JOIN assignments ON assignments.id = submissions.assignment_id").
-		Where("submissions.id = ? AND assignments.owner_id = ?", submissionID, ownerID).
-		First(&submission).Error
+	submission, err := h.findAccessibleSubmission(c, userID, submissionID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fiber.NewError(fiber.StatusNotFound, "submission not found")
@@ -343,7 +427,7 @@ func derefOr(v *float64, fallback float64) float64 {
 }
 
 func (h *SubmissionHandler) Get(c *fiber.Ctx) error {
-	ownerID, err := middleware.UserIDFromContext(c)
+	userID, err := middleware.UserIDFromContext(c)
 	if err != nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "invalid token")
 	}
@@ -353,10 +437,7 @@ func (h *SubmissionHandler) Get(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid submission id")
 	}
 
-	var submission models.Submission
-	err = h.DB.Joins("JOIN assignments ON assignments.id = submissions.assignment_id").
-		Where("submissions.id = ? AND assignments.owner_id = ?", submissionID, ownerID).
-		First(&submission).Error
+	submission, err := h.findAccessibleSubmission(c, userID, submissionID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fiber.NewError(fiber.StatusNotFound, "submission not found")
@@ -385,7 +466,7 @@ func (h *SubmissionHandler) Get(c *fiber.Ctx) error {
 }
 
 func (h *SubmissionHandler) GetComposited(c *fiber.Ctx) error {
-	ownerID, err := middleware.UserIDFromContext(c)
+	userID, err := middleware.UserIDFromContext(c)
 	if err != nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "invalid token")
 	}
@@ -395,15 +476,11 @@ func (h *SubmissionHandler) GetComposited(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid submission id")
 	}
 
-	var owned int64
-	if err := h.DB.Table("submissions").
-		Joins("JOIN assignments ON assignments.id = submissions.assignment_id").
-		Where("submissions.id = ? AND assignments.owner_id = ?", submissionID, ownerID).
-		Count(&owned).Error; err != nil {
+	if _, err := h.findAccessibleSubmission(c, userID, submissionID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fiber.NewError(fiber.StatusNotFound, "submission not found")
+		}
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up submission")
-	}
-	if owned == 0 {
-		return fiber.NewError(fiber.StatusNotFound, "submission not found")
 	}
 
 	doc, err := h.latestComposited(submissionID)
@@ -462,4 +539,84 @@ func (h *SubmissionHandler) latestComposited(submissionID uuid.UUID) (*models.Co
 		return nil, err
 	}
 	return &doc, nil
+}
+
+type gradeRequest struct {
+	Grade    *string `json:"grade"`
+	Feedback *string `json:"feedback"`
+}
+
+// Grade records a teacher's mark on a submission (any assignment source),
+// and — when the assignment was imported from Classroom and the submission
+// was actually turned in there — pushes the same grade back with the
+// teacher's own Classroom credentials, so both places agree. A non-numeric
+// grade (e.g. "A-") is saved in Gradle but simply can't sync to Classroom's
+// numeric assignedGrade field.
+func (h *SubmissionHandler) Grade(c *fiber.Ctx) error {
+	ownerID, err := middleware.UserIDFromContext(c)
+	if err != nil {
+		return fiber.NewError(fiber.StatusUnauthorized, "invalid token")
+	}
+	if middleware.IsStudent(c) {
+		return fiber.NewError(fiber.StatusForbidden, "only a teacher can grade a submission")
+	}
+
+	submissionID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid submission id")
+	}
+
+	var req gradeRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+	}
+
+	var submission models.Submission
+	var assignment models.Assignment
+	err = h.DB.Joins("JOIN assignments ON assignments.id = submissions.assignment_id").
+		Where("submissions.id = ? AND assignments.owner_id = ?", submissionID, ownerID).
+		First(&submission).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fiber.NewError(fiber.StatusNotFound, "submission not found")
+		}
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up submission")
+	}
+	if err := h.DB.First(&assignment, "id = ?", submission.AssignmentID).Error; err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up assignment")
+	}
+
+	if err := h.DB.Model(&models.Submission{}).Where("id = ?", submissionID).Updates(map[string]any{
+		"grade":    req.Grade,
+		"feedback": req.Feedback,
+	}).Error; err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to save grade")
+	}
+	submission.Grade = req.Grade
+	submission.Feedback = req.Feedback
+
+	if syncErr := h.syncGradeToClassroom(c.Context(), ownerID, assignment, submission); syncErr != nil {
+		return c.JSON(fiber.Map{"submission": submission, "classroom_sync_error": syncErr.Error()})
+	}
+	return c.JSON(fiber.Map{"submission": submission})
+}
+
+func (h *SubmissionHandler) syncGradeToClassroom(ctx context.Context, ownerID uuid.UUID, assignment models.Assignment, submission models.Submission) error {
+	if assignment.Source != models.AssignmentSourceClassroom || submission.ExternalSubmissionID == nil || submission.Grade == nil {
+		return nil
+	}
+	grade, err := googleclassroom.ParseGrade(*submission.Grade)
+	if err != nil {
+		return fmt.Errorf("grade %q isn't numeric, so it can't sync to google classroom", *submission.Grade)
+	}
+
+	httpClient, err := googleclassroom.HTTPClientFor(ctx, h.DB, h.Config, ownerID, googleclassroom.FlowTeacherConnect)
+	if err != nil {
+		return fmt.Errorf("connect your google account to push grades to classroom")
+	}
+	client, err := googleclassroom.NewClient(ctx, httpClient)
+	if err != nil {
+		return err
+	}
+	return client.PatchGradeAndReturn(ctx, *assignment.ExternalCourseID, *assignment.ExternalID, *submission.ExternalSubmissionID, grade)
 }

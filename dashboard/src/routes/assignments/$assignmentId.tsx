@@ -34,6 +34,11 @@ function AssignmentDetailPage() {
           {a.subject_name ?? 'No subject'} · Teacher: {a.teacher_email}
           {a.due_date && <> · Due {new Date(a.due_date).toLocaleDateString()}</>}
         </p>
+        {a.source === 'classroom' && (
+          <p className="mt-1 text-xs text-slate-400">
+            Imported from Google Classroom — read-only.
+          </p>
+        )}
       </div>
 
       <section>

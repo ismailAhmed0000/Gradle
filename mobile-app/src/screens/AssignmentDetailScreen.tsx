@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import Pdf from 'react-native-pdf';
 import { useAssignments } from '../context/AssignmentsContext';
+import { useAuth } from '../context/AuthContext';
 import { useSubmissions } from '../context/SubmissionsContext';
 import { TasksStackParamList } from '../navigation/types';
 import { CameraIcon } from '../components/BottomNavBar';
@@ -71,6 +72,8 @@ type Props = NativeStackScreenProps<TasksStackParamList, 'AssignmentDetail'>;
 
 export function AssignmentDetailScreen({ route, navigation }: Props) {
   const { assignmentId } = route.params;
+  const { user } = useAuth();
+  const isStudent = user?.role === 'student';
   // Avoid keeping the (fairly heavy) native PDF view alive underneath
   // SubmissionDetail once the user navigates away from this screen.
   const isFocused = useIsFocused();
@@ -159,15 +162,17 @@ export function AssignmentDetailScreen({ route, navigation }: Props) {
   );
 
   function handleStartScan() {
+    // A student submits as themselves — the backend derives their name from
+    // their own linked roster record, so there's nothing to prompt for.
+    if (isStudent) {
+      startSubmission('');
+      return;
+    }
     setStudentName('');
     setShowNameModal(true);
   }
 
-  async function handleConfirmStudent() {
-    const name = studentName.trim();
-    if (!name) {
-      return;
-    }
+  async function startSubmission(name: string) {
     setCreatingSubmission(true);
     try {
       const created = await createSubmission(assignmentId, name);
@@ -184,6 +189,14 @@ export function AssignmentDetailScreen({ route, navigation }: Props) {
     } finally {
       setCreatingSubmission(false);
     }
+  }
+
+  async function handleConfirmStudent() {
+    const name = studentName.trim();
+    if (!name) {
+      return;
+    }
+    await startSubmission(name);
   }
 
   async function handleCapture(

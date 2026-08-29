@@ -23,6 +23,12 @@ type Config struct {
 	S3VirtualHost    bool
 	InternalAPIToken string
 	CORSOrigins      string
+
+	GoogleClientID     string
+	GoogleClientSecret string
+	GoogleRedirectURL  string
+	TokenEncryptionKey string
+	DashboardURL       string
 }
 
 func Load() (*Config, error) {
@@ -48,6 +54,12 @@ func Load() (*Config, error) {
 		S3VirtualHost:    getEnv("S3_VIRTUAL_HOST_STYLE", "false") == "true",
 		InternalAPIToken: os.Getenv("INTERNAL_API_TOKEN"),
 		CORSOrigins:      getEnv("CORS_ORIGINS", "http://localhost:5173"),
+
+		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
+		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+		GoogleRedirectURL:  os.Getenv("GOOGLE_REDIRECT_URL"),
+		TokenEncryptionKey: os.Getenv("GOOGLE_TOKEN_ENCRYPTION_KEY"),
+		DashboardURL:       getEnv("DASHBOARD_URL", "http://localhost:5173"),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -59,6 +71,9 @@ func Load() (*Config, error) {
 	if cfg.InternalAPIToken == "" {
 		return nil, fmt.Errorf("INTERNAL_API_TOKEN is required")
 	}
+	// Google integration is optional at boot (local dev without Classroom
+	// wired up yet); handlers that need it check these individually and
+	// return a clear error instead of the server refusing to start.
 
 	return cfg, nil
 }

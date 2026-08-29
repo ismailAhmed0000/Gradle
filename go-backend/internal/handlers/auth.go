@@ -61,7 +61,7 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 
 	user := models.User{
 		Email:        req.Email,
-		PasswordHash: passwordHash,
+		PasswordHash: &passwordHash,
 		Role:         models.RoleTeacher,
 	}
 	if err := h.DB.Create(&user).Error; err != nil {
@@ -98,7 +98,7 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up account")
 	}
 
-	if !auth.CheckPassword(user.PasswordHash, req.Password) {
+	if user.PasswordHash == nil || !auth.CheckPassword(*user.PasswordHash, req.Password) {
 		return fiber.NewError(fiber.StatusUnauthorized, invalidCredentialsMsg)
 	}
 

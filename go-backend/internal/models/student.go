@@ -7,11 +7,13 @@ import (
 )
 
 type Student struct {
-	ID        uuid.UUID `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	OwnerID   uuid.UUID `json:"owner_id" gorm:"type:uuid"`
-	Name      string    `json:"name"`
-	Email     *string   `json:"email,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID         uuid.UUID  `json:"id" gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	OwnerID    uuid.UUID  `json:"owner_id" gorm:"type:uuid"`
+	Name       string     `json:"name"`
+	Email      *string    `json:"email,omitempty"`
+	UserID     *uuid.UUID `json:"user_id,omitempty" gorm:"type:uuid"`
+	ExternalID *string    `json:"external_id,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
 }
 
 type StudentSummary struct {

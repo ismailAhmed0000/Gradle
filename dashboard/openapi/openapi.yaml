@@ -301,6 +301,150 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
+  /api/submissions/{id}/grade:
+    parameters:
+      - $ref: "#/components/parameters/SubmissionId"
+    patch:
+      operationId: gradeSubmission
+      summary: Record a grade/feedback for a submission; syncs to Classroom when applicable
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GradeRequest"
+      responses:
+        "200":
+          description: Grade saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GradeResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/integrations/google/status:
+    get:
+      operationId: googleStatus
+      summary: Whether the logged-in user has connected a Google account
+      responses:
+        "200":
+          description: Connection status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoogleStatus"
+        "401":
+          $ref: "#/components/responses/Error"
+
+  /api/integrations/google:
+    delete:
+      operationId: googleDisconnect
+      summary: Disconnect the logged-in user's Google account
+      responses:
+        "204":
+          description: Disconnected
+        "401":
+          $ref: "#/components/responses/Error"
+
+  /api/integrations/google/teacher/auth-url:
+    get:
+      operationId: googleTeacherAuthUrl
+      summary: Build the consent URL to connect Google Classroom as a teacher
+      parameters:
+        - name: redirect_uri
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Authorization URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoogleAuthUrl"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+
+  /api/integrations/google/courses:
+    get:
+      operationId: googleCourses
+      summary: List active Classroom courses the connected teacher teaches
+      responses:
+        "200":
+          description: Courses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GoogleCourse"
+        "401":
+          $ref: "#/components/responses/Error"
+        "412":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+
+  /api/integrations/google/courses/{id}/coursework:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: googleCourseWork
+      summary: List a course's coursework, flagging what's already imported
+      responses:
+        "200":
+          description: Coursework
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GoogleCourseWork"
+        "401":
+          $ref: "#/components/responses/Error"
+        "412":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+
+  /api/integrations/google/import:
+    post:
+      operationId: googleImport
+      summary: Import selected coursework as read-only assignments, syncing the roster
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoogleImportRequest"
+      responses:
+        "201":
+          description: Imported assignments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoogleImportResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "412":
+          $ref: "#/components/responses/Error"
+
   /api/subjects:
     get:
       operationId: listSubjects
@@ -638,6 +782,9 @@ components:
           nullable: true
         status:
           $ref: "#/components/schemas/AssignmentStatus"
+        source:
+          type: string
+          enum: [manual, classroom]
         created_at:
           type: string
           format: date-time
@@ -751,6 +898,12 @@ components:
           type: string
         status:
           $ref: "#/components/schemas/SubmissionStatus"
+        grade:
+          type: string
+          nullable: true
+        feedback:
+          type: string
+          nullable: true
         created_at:
           type: string
           format: date-time
@@ -767,6 +920,103 @@ components:
               type: integer
             answer_regions_total:
               type: integer
+
+    GradeRequest:
+      type: object
+      properties:
+        grade:
+          type: string
+          nullable: true
+        feedback:
+          type: string
+          nullable: true
+
+    GradeResponse:
+      type: object
+      required: [submission]
+      properties:
+        submission:
+          $ref: "#/components/schemas/Submission"
+        classroom_sync_error:
+          type: string
+
+    GoogleStatus:
+      type: object
+      required: [connected]
+      properties:
+        connected:
+          type: boolean
+        google_email:
+          type: string
+
+    GoogleAuthUrl:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+
+    GoogleCourse:
+      type: object
+      required: [ID, Name]
+      properties:
+        ID:
+          type: string
+        Name:
+          type: string
+
+    GoogleCourseWorkMaterial:
+      type: object
+      properties:
+        DriveFileID:
+          type: string
+        Title:
+          type: string
+
+    GoogleCourseWork:
+      type: object
+      required: [ID, CourseID, Title, already_imported]
+      properties:
+        ID:
+          type: string
+        CourseID:
+          type: string
+        Title:
+          type: string
+        Description:
+          type: string
+        DueDate:
+          type: string
+          nullable: true
+        Materials:
+          type: array
+          items:
+            $ref: "#/components/schemas/GoogleCourseWorkMaterial"
+        already_imported:
+          type: boolean
+
+    GoogleImportRequest:
+      type: object
+      required: [course_id, subject_id, coursework_ids]
+      properties:
+        course_id:
+          type: string
+        subject_id:
+          type: string
+          format: uuid
+        coursework_ids:
+          type: array
+          items:
+            type: string
+
+    GoogleImportResult:
+      type: object
+      required: [imported]
+      properties:
+        imported:
+          type: array
+          items:
+            $ref: "#/components/schemas/Assignment"
 
     SubmissionPage:
       type: object

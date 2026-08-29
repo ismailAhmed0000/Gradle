@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import {
   ActivityIndicator,
+  Linking,
   Pressable,
   Text,
   TextInput,
   View,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import { fetchGoogleSignInUrl } from '../api/auth';
 
 const ACCENT_COLOR = '#2f6690';
 
@@ -20,6 +22,20 @@ export function LoginScreen({ onSwitchToRegister }: Props) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isOpeningGoogle, setIsOpeningGoogle] = useState(false);
+
+  async function handleGoogleSignIn() {
+    setError(null);
+    setIsOpeningGoogle(true);
+    try {
+      const url = await fetchGoogleSignInUrl();
+      await Linking.openURL(url);
+    } catch {
+      setError('Could not start Google sign-in. Please try again.');
+    } finally {
+      setIsOpeningGoogle(false);
+    }
+  }
 
   async function handleSubmit() {
     if (!email || !password) {
@@ -93,6 +109,28 @@ export function LoginScreen({ onSwitchToRegister }: Props) {
         >
           Don't have an account? Sign up
         </Text>
+      </Pressable>
+
+      <View className="mt-6 flex-row items-center">
+        <View className="h-px flex-1 bg-gray-200" />
+        <Text className="mx-3 text-xs font-semibold text-gray-400">
+          STUDENTS
+        </Text>
+        <View className="h-px flex-1 bg-gray-200" />
+      </View>
+
+      <Pressable
+        onPress={handleGoogleSignIn}
+        disabled={isOpeningGoogle}
+        className="mt-4 items-center rounded-xl border border-gray-200 py-3.5 disabled:opacity-60"
+      >
+        {isOpeningGoogle ? (
+          <ActivityIndicator color={ACCENT_COLOR} />
+        ) : (
+          <Text className="text-base font-semibold text-gray-900">
+            Continue with Google
+          </Text>
+        )}
       </Pressable>
     </View>
   );

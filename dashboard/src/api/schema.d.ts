@@ -222,6 +222,129 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/submissions/{id}/grade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["SubmissionId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Record a grade/feedback for a submission; syncs to Classroom when applicable */
+        patch: operations["gradeSubmission"];
+        trace?: never;
+    };
+    "/api/integrations/google/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether the logged-in user has connected a Google account */
+        get: operations["googleStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/google": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Disconnect the logged-in user's Google account */
+        delete: operations["googleDisconnect"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/google/teacher/auth-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Build the consent URL to connect Google Classroom as a teacher */
+        get: operations["googleTeacherAuthUrl"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/google/courses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List active Classroom courses the connected teacher teaches */
+        get: operations["googleCourses"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/google/courses/{id}/coursework": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** List a course's coursework, flagging what's already imported */
+        get: operations["googleCourseWork"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/google/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import selected coursework as read-only assignments, syncing the roster */
+        post: operations["googleImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/subjects": {
         parameters: {
             query?: never;
@@ -380,6 +503,8 @@ export interface components {
             /** Format: date-time */
             due_date?: string | null;
             status: components["schemas"]["AssignmentStatus"];
+            /** @enum {string} */
+            source?: "manual" | "classroom";
             /** Format: date-time */
             created_at: string;
         };
@@ -434,6 +559,8 @@ export interface components {
             student_id?: string | null;
             student_name: string;
             status: components["schemas"]["SubmissionStatus"];
+            grade?: string | null;
+            feedback?: string | null;
             /** Format: date-time */
             created_at: string;
         };
@@ -441,6 +568,47 @@ export interface components {
             page_count: number;
             answer_regions_done: number;
             answer_regions_total: number;
+        };
+        GradeRequest: {
+            grade?: string | null;
+            feedback?: string | null;
+        };
+        GradeResponse: {
+            submission: components["schemas"]["Submission"];
+            classroom_sync_error?: string;
+        };
+        GoogleStatus: {
+            connected: boolean;
+            google_email?: string;
+        };
+        GoogleAuthUrl: {
+            url: string;
+        };
+        GoogleCourse: {
+            ID: string;
+            Name: string;
+        };
+        GoogleCourseWorkMaterial: {
+            DriveFileID?: string;
+            Title?: string;
+        };
+        GoogleCourseWork: {
+            ID: string;
+            CourseID: string;
+            Title: string;
+            Description?: string;
+            DueDate?: string | null;
+            Materials?: components["schemas"]["GoogleCourseWorkMaterial"][];
+            already_imported: boolean;
+        };
+        GoogleImportRequest: {
+            course_id: string;
+            /** Format: uuid */
+            subject_id: string;
+            coursework_ids: string[];
+        };
+        GoogleImportResult: {
+            imported: components["schemas"]["Assignment"][];
         };
         SubmissionPage: {
             /** Format: uuid */
@@ -937,6 +1105,175 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    gradeSubmission: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["SubmissionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GradeRequest"];
+            };
+        };
+        responses: {
+            /** @description Grade saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GradeResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    googleStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Connection status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoogleStatus"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    googleDisconnect: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Disconnected */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    googleTeacherAuthUrl: {
+        parameters: {
+            query: {
+                redirect_uri: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authorization URL */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoogleAuthUrl"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+        };
+    };
+    googleCourses: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Courses */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoogleCourse"][];
+                };
+            };
+            401: components["responses"]["Error"];
+            412: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    googleCourseWork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Coursework */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoogleCourseWork"][];
+                };
+            };
+            401: components["responses"]["Error"];
+            412: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    googleImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GoogleImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Imported assignments */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoogleImportResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            412: components["responses"]["Error"];
         };
     };
     listSubjects: {

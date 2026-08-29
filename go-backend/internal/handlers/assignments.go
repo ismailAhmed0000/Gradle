@@ -32,21 +32,48 @@ func NewAssignmentHandler(db *gorm.DB, s *storage.S3Storage) *AssignmentHandler 
 }
 
 func (h *AssignmentHandler) List(c *fiber.Ctx) error {
-	ownerID, err := middleware.UserIDFromContext(c)
+	userID, err := middleware.UserIDFromContext(c)
 	if err != nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "invalid token")
 	}
 
+	query := h.DB.Preload("Subject")
+	if middleware.IsStudent(c) {
+		student, err := studentForUser(h.DB, userID)
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "failed to look up student record")
+		}
+		if student == nil {
+			return c.JSON([]models.Assignment{})
+		}
+		query = query.
+			Joins("JOIN enrollments ON enrollments.subject_id = assignments.subject_id").
+			Where("enrollments.student_id = ?", student.ID)
+	} else {
+		query = query.Where("owner_id = ?", userID)
+	}
+
 	var assignments []models.Assignment
-	if err := h.DB.Preload("Subject").
-		Where("owner_id = ?", ownerID).
+	if err := query.
 		Order("created_at DESC").
 		Find(&assignments).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to list assignments")
 	}
 
+	// A student's own status is scoped to their own submission — the
+	// teacher's list view intentionally keeps showing whichever submission
+	// was created most recently across the whole class (pre-existing
+	// behavior for the "who needs grading" glance).
+	var studentScope *uuid.UUID
+	if middleware.IsStudent(c) {
+		student, err := studentForUser(h.DB, userID)
+		if err == nil && student != nil {
+			studentScope = &student.ID
+		}
+	}
+
 	for i := range assignments {
-		if err := h.attachComputedFields(&assignments[i]); err != nil {
+		if err := h.attachComputedFields(&assignments[i], studentScope); err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "failed to read assignments")
 		}
 	}
@@ -54,13 +81,17 @@ func (h *AssignmentHandler) List(c *fiber.Ctx) error {
 	return c.JSON(assignments)
 }
 
-func (h *AssignmentHandler) attachComputedFields(a *models.Assignment) error {
+func (h *AssignmentHandler) attachComputedFields(a *models.Assignment, studentID *uuid.UUID) error {
 	if a.Subject != nil {
 		a.SubjectName = &a.Subject.Name
 	}
 
+	query := h.DB.Where("assignment_id = ?", a.ID)
+	if studentID != nil {
+		query = query.Where("student_id = ?", *studentID)
+	}
 	var latest models.Submission
-	err := h.DB.Where("assignment_id = ?", a.ID).Order("created_at DESC").First(&latest).Error
+	err := query.Order("created_at DESC").First(&latest).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
@@ -126,6 +157,7 @@ func (h *AssignmentHandler) Create(c *fiber.Ctx) error {
 		Title:     req.Title,
 		SubjectID: &req.SubjectID,
 		DueDate:   req.DueDate,
+		Source:    models.AssignmentSourceManual,
 	}
 	if err := h.DB.Create(&a).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to create assignment")
@@ -138,7 +170,7 @@ func (h *AssignmentHandler) Create(c *fiber.Ctx) error {
 }
 
 func (h *AssignmentHandler) GetByID(c *fiber.Ctx) error {
-	ownerID, err := middleware.UserIDFromContext(c)
+	userID, err := middleware.UserIDFromContext(c)
 	if err != nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "invalid token")
 	}
@@ -148,17 +180,34 @@ func (h *AssignmentHandler) GetByID(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid assignment id")
 	}
 
+	query := h.DB.Preload("Subject").Preload("Owner").Where("id = ?", assignmentID)
+
+	var studentScope *uuid.UUID
+	if middleware.IsStudent(c) {
+		student, serr := studentForUser(h.DB, userID)
+		if serr != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "failed to look up student record")
+		}
+		if student == nil {
+			return fiber.NewError(fiber.StatusNotFound, "assignment not found")
+		}
+		studentScope = &student.ID
+		query = query.
+			Joins("JOIN enrollments ON enrollments.subject_id = assignments.subject_id").
+			Where("enrollments.student_id = ?", student.ID)
+	} else {
+		query = query.Where("owner_id = ?", userID)
+	}
+
 	var assignment models.Assignment
-	err = h.DB.Preload("Subject").Preload("Owner").
-		Where("id = ? AND owner_id = ?", assignmentID, ownerID).
-		First(&assignment).Error
+	err = query.First(&assignment).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fiber.NewError(fiber.StatusNotFound, "assignment not found")
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up assignment")
 	}
-	if err := h.attachComputedFields(&assignment); err != nil {
+	if err := h.attachComputedFields(&assignment, studentScope); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up submission status")
 	}
 
@@ -200,11 +249,14 @@ func (h *AssignmentHandler) UploadFile(c *fiber.Ctx) error {
 	}
 
 	var assignment models.Assignment
-	if err := h.DB.Select("id").Where("id = ? AND owner_id = ?", assignmentID, ownerID).First(&assignment).Error; err != nil {
+	if err := h.DB.Select("id", "source").Where("id = ? AND owner_id = ?", assignmentID, ownerID).First(&assignment).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fiber.NewError(fiber.StatusNotFound, "assignment not found")
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up assignment")
+	}
+	if assignment.Source == models.AssignmentSourceClassroom {
+		return fiber.NewError(fiber.StatusForbidden, "assignments imported from google classroom are read-only")
 	}
 
 	fileHeader, err := c.FormFile("file")

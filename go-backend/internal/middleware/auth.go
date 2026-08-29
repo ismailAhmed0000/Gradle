@@ -26,6 +26,11 @@ func IsAdmin(c *fiber.Ctx) bool {
 	return role == "admin"
 }
 
+func IsStudent(c *fiber.Ctx) bool {
+	role, _ := c.Locals(LocalsRole).(string)
+	return role == "student"
+}
+
 // RequireAdmin must run after RequireAuth.
 func RequireAdmin() fiber.Handler {
 	return func(c *fiber.Ctx) error {

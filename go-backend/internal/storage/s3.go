@@ -71,6 +71,19 @@ func (s *S3Storage) PutObject(ctx context.Context, key string, reader io.Reader,
 	return nil
 }
 
+func (s *S3Storage) GetObject(ctx context.Context, key string) ([]byte, error) {
+	obj, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("fetching %q: %w", key, err)
+	}
+	defer obj.Close()
+	data, err := io.ReadAll(obj)
+	if err != nil {
+		return nil, fmt.Errorf("reading %q: %w", key, err)
+	}
+	return data, nil
+}
+
 func (s *S3Storage) PresignedGetURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
 	url, err := s.publicClient.PresignedGetObject(ctx, s.bucket, key, expiry, nil)
 	if err != nil {
