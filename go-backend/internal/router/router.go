@@ -45,6 +45,7 @@ func Setup(app *fiber.App, h *Handlers, cfg *config.Config) {
 	assignmentsGroup.Get("/", h.Assignments.List)
 	assignmentsGroup.Post("/", h.Assignments.Create)
 	assignmentsGroup.Get("/:id", h.Assignments.GetByID)
+	assignmentsGroup.Post("/:id/files", h.Assignments.UploadFile)
 	assignmentsGroup.Get("/:id/submissions", h.Submissions.ListForAssignment)
 	assignmentsGroup.Post("/:id/submissions", h.Submissions.Create)
 
@@ -56,12 +57,15 @@ func Setup(app *fiber.App, h *Handlers, cfg *config.Config) {
 	subjectsGroup := api.Group("/subjects", requireAuth)
 	subjectsGroup.Get("/", h.Subjects.List)
 	subjectsGroup.Post("/", h.Subjects.Create)
+	subjectsGroup.Get("/:id", h.Subjects.GetByID)
+
+	requireAdmin := middleware.RequireAdmin()
 
 	studentsGroup := api.Group("/students", requireAuth)
 	studentsGroup.Get("/", h.Students.List)
-	studentsGroup.Post("/", h.Students.Create)
+	studentsGroup.Post("/", requireAdmin, h.Students.Create)
 	studentsGroup.Get("/:id", h.Students.Get)
-	studentsGroup.Post("/:id/enroll", h.Students.Enroll)
+	studentsGroup.Post("/:id/enroll", requireAdmin, h.Students.Enroll)
 
 	requireInternalToken := middleware.RequireInternalToken(cfg.InternalAPIToken)
 

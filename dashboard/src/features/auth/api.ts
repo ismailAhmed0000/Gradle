@@ -32,6 +32,11 @@ export function useMe(enabled: boolean) {
   })
 }
 
+export function useIsAdmin() {
+  const { data } = useMe(true)
+  return data?.role === 'admin'
+}
+
 export function logout() {
   clearToken()
 }

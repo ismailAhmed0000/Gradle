@@ -9,6 +9,15 @@ export function useSubjects() {
   })
 }
 
+export function useSubject(id: string) {
+  return useQuery({
+    queryKey: ['subjects', id],
+    queryFn: async () =>
+      unwrap(await api.GET('/api/subjects/{id}', { params: { path: { id } } })),
+    enabled: id.length > 0,
+  })
+}
+
 export function useCreateSubject() {
   const queryClient = useQueryClient()
   return useMutation({

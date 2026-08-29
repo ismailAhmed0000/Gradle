@@ -28,3 +28,22 @@ export function useCreateAssignment() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['assignments'] }),
   })
 }
+
+export function useUploadAssignmentFile() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ assignmentId, file }: { assignmentId: string; file: File }) => {
+      const body = new FormData()
+      body.append('file', file)
+      const result = await api.POST('/api/assignments/{id}/files', {
+        params: { path: { id: assignmentId } },
+        // openapi-fetch passes FormData through untouched and lets the
+        // browser set the multipart Content-Type + boundary itself.
+        body: body as unknown as { file: string },
+      })
+      return unwrap(result)
+    },
+    onSuccess: (_data, variables) =>
+      queryClient.invalidateQueries({ queryKey: ['assignments', variables.assignmentId] }),
+  })
+}

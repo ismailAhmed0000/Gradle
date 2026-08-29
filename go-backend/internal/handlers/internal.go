@@ -20,8 +20,6 @@ func NewInternalHandler(db *gorm.DB, q *queue.JobQueue) *InternalHandler {
 	return &InternalHandler{DB: db, Queue: q}
 }
 
-// --- answer regions (extract_ink jobs) ---
-
 func (h *InternalHandler) AnswerRegionContext(c *fiber.Ctx) error {
 	regionID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
@@ -169,7 +167,6 @@ func (h *InternalHandler) maybeStartCompositing(submissionID uuid.UUID) (*uuid.U
 		case err == nil:
 			nextVersion = latest.Version + 1
 		case errors.Is(err, gorm.ErrRecordNotFound):
-			// first composited document for this submission
 		default:
 			return err
 		}
@@ -196,8 +193,6 @@ func (h *InternalHandler) maybeStartCompositing(submissionID uuid.UUID) (*uuid.U
 
 	return &compositedID, nil
 }
-
-// --- composited documents (composite_pdf jobs) ---
 
 type compositeAnswer struct {
 	AssignmentFileID uuid.UUID `json:"assignment_file_id"`

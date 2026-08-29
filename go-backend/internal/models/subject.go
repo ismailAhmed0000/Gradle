@@ -12,3 +12,8 @@ type Subject struct {
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+type SubjectDetail struct {
+	Subject
+	Students []Student `json:"students"`
+}

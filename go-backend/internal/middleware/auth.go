@@ -21,6 +21,21 @@ func UserIDFromContext(c *fiber.Ctx) (uuid.UUID, error) {
 	return uuid.Parse(raw)
 }
 
+func IsAdmin(c *fiber.Ctx) bool {
+	role, _ := c.Locals(LocalsRole).(string)
+	return role == "admin"
+}
+
+// RequireAdmin must run after RequireAuth.
+func RequireAdmin() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if !IsAdmin(c) {
+			return fiber.NewError(fiber.StatusForbidden, "admin access required")
+		}
+		return c.Next()
+	}
+}
+
 func RequireAuth(jwtSecret string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		header := c.Get("Authorization")

@@ -19,10 +19,6 @@ type StudentSummary struct {
 	Subjects []Subject `json:"subjects" gorm:"-"`
 }
 
-// StudentSubmission describes one assignment in a subject the student is
-// enrolled in, plus their submission for it if they've started one — a
-// student can be listed here with no submission yet. It's an output DTO
-// assembled by hand in the handler, never queried directly.
 type StudentSubmission struct {
 	SubmissionID       *uuid.UUID        `json:"submission_id,omitempty"`
 	AssignmentID       uuid.UUID         `json:"assignment_id"`

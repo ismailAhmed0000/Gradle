@@ -2,6 +2,7 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useEnrollStudent, useStudent } from '../../features/students/api'
 import { useSubjects } from '../../features/subjects/api'
+import { useIsAdmin } from '../../features/auth/api'
 import { Badge } from '../../components/Badge'
 import { requireAuth } from '../../lib/guards'
 
@@ -12,7 +13,7 @@ export const Route = createFileRoute('/students/$studentId')({
 
 function EnrollForm({ studentId, enrolledIds }: { studentId: string; enrolledIds: Set<string> }) {
   const subjects = useSubjects()
-  const enroll = useEnrollStudent(studentId)
+  const enroll = useEnrollStudent()
   const [subjectId, setSubjectId] = useState('')
 
   const available = subjects.data?.filter((s) => !enrolledIds.has(s.id)) ?? []
@@ -20,7 +21,7 @@ function EnrollForm({ studentId, enrolledIds }: { studentId: string; enrolledIds
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!subjectId) return
-    enroll.mutate({ subject_id: subjectId }, { onSuccess: () => setSubjectId('') })
+    enroll.mutate({ studentId, subjectId }, { onSuccess: () => setSubjectId('') })
   }
 
   if (subjects.data && available.length === 0) {
@@ -58,6 +59,7 @@ function EnrollForm({ studentId, enrolledIds }: { studentId: string; enrolledIds
 function StudentDetailPage() {
   const { studentId } = Route.useParams()
   const student = useStudent(studentId)
+  const isAdmin = useIsAdmin()
 
   if (student.isLoading) return <p className="text-slate-500">Loading…</p>
   if (student.isError) return <p className="text-red-600">{student.error.message}</p>
@@ -92,7 +94,7 @@ function StudentDetailPage() {
             ))
           )}
         </div>
-        <EnrollForm studentId={studentId} enrolledIds={enrolledIds} />
+        {isAdmin && <EnrollForm studentId={studentId} enrolledIds={enrolledIds} />}
       </section>
 
       <section>

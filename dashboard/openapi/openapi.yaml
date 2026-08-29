@@ -152,6 +152,37 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
+  /api/assignments/{id}/files:
+    parameters:
+      - $ref: "#/components/parameters/AssignmentId"
+    post:
+      operationId: uploadAssignmentFile
+      summary: Upload a PDF question paper for an assignment
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: File stored; page count parsed from the PDF
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignmentFile"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
   /api/assignments/{id}/submissions:
     parameters:
       - $ref: "#/components/parameters/AssignmentId"
@@ -273,7 +304,7 @@ paths:
   /api/subjects:
     get:
       operationId: listSubjects
-      summary: List the logged-in teacher's subjects
+      summary: List subjects — every subject for an admin, the teacher's own otherwise
       responses:
         "200":
           description: Subjects
@@ -308,6 +339,28 @@ paths:
         "409":
           $ref: "#/components/responses/Error"
 
+  /api/subjects/{id}:
+    parameters:
+      - $ref: "#/components/parameters/SubjectId"
+    get:
+      operationId: getSubject
+      summary: >
+        Get a subject and every student enrolled in it. A teacher gets 404
+        for a subject they don't own, same as if it didn't exist.
+      responses:
+        "200":
+          description: Subject detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubjectDetail"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
   /api/students:
     get:
       operationId: listStudents
@@ -325,7 +378,7 @@ paths:
           $ref: "#/components/responses/Error"
     post:
       operationId: createStudent
-      summary: Add a student to the roster
+      summary: Add a student to the roster (admin only)
       requestBody:
         required: true
         content:
@@ -343,6 +396,8 @@ paths:
           $ref: "#/components/responses/Error"
         "401":
           $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
 
@@ -351,7 +406,10 @@ paths:
       - $ref: "#/components/parameters/StudentId"
     get:
       operationId: getStudent
-      summary: Get a student's enrolled subjects and work across assignments
+      summary: >
+        Get a student's enrolled subjects and work across assignments. A
+        teacher only sees the slice that runs through subjects they own, and
+        gets 404 if the student has no relationship to any of them.
       responses:
         "200":
           description: Student detail
@@ -371,7 +429,7 @@ paths:
       - $ref: "#/components/parameters/StudentId"
     post:
       operationId: enrollStudent
-      summary: Enroll a student into a subject
+      summary: Enroll a student into a subject (admin only)
       requestBody:
         required: true
         content:
@@ -390,6 +448,8 @@ paths:
         "400":
           $ref: "#/components/responses/Error"
         "401":
+          $ref: "#/components/responses/Error"
+        "403":
           $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
@@ -417,6 +477,13 @@ components:
         type: string
         format: uuid
     StudentId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SubjectId:
       name: id
       in: path
       required: true
@@ -489,7 +556,7 @@ components:
 
     DailyActivity:
       type: object
-      required: [date, weekday, pages_scanned]
+      required: [date, weekday, pages_scanned, pending_submissions, pending_to_grade]
       properties:
         date:
           type: string
@@ -497,6 +564,10 @@ components:
         weekday:
           type: string
         pages_scanned:
+          type: integer
+        pending_submissions:
+          type: integer
+        pending_to_grade:
           type: integer
 
     DashboardSummary:
@@ -508,6 +579,10 @@ components:
         - pending_this_week
         - submissions_this_week
         - pages_scanned_this_week
+        - total_students
+        - total_subjects
+        - pending_submissions
+        - pending_to_grade
       properties:
         today_pages_scanned:
           type: integer
@@ -523,6 +598,16 @@ components:
           type: integer
         pages_scanned_this_week:
           type: integer
+        total_students:
+          type: integer
+        total_subjects:
+          type: integer
+        pending_submissions:
+          type: integer
+          description: Assignments no student has submitted for yet.
+        pending_to_grade:
+          type: integer
+          description: Assignments with a submission that hasn't been composited (graded) yet.
 
     AssignmentStatus:
       type: string
@@ -850,6 +935,17 @@ components:
         created_at:
           type: string
           format: date-time
+
+    SubjectDetail:
+      allOf:
+        - $ref: "#/components/schemas/Subject"
+        - type: object
+          required: [students]
+          properties:
+            students:
+              type: array
+              items:
+                $ref: "#/components/schemas/Student"
 
     CreateSubjectRequest:
       type: object

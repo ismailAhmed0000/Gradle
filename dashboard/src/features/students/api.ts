@@ -29,19 +29,20 @@ export function useCreateStudent() {
   })
 }
 
-export function useEnrollStudent(studentId: string) {
+export function useEnrollStudent() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (body: { subject_id: string }) => {
+    mutationFn: async ({ studentId, subjectId }: { studentId: string; subjectId: string }) => {
       const result = await api.POST('/api/students/{id}/enroll', {
         params: { path: { id: studentId } },
-        body,
+        body: { subject_id: subjectId },
       })
       return unwrap(result)
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['students', studentId] })
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['students', variables.studentId] })
       queryClient.invalidateQueries({ queryKey: ['students'] })
+      queryClient.invalidateQueries({ queryKey: ['subjects', variables.subjectId] })
     },
   })
 }

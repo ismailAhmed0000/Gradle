@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useCreateSubject, useSubjects } from '../../features/subjects/api'
+import { SubjectStudentsPanel } from '../../features/subjects/SubjectStudentsPanel'
 import { requireAuth } from '../../lib/guards'
 
 export const Route = createFileRoute('/subjects/')({
@@ -57,9 +58,26 @@ function NewSubjectForm({ onDone }: { onDone: () => void }) {
   )
 }
 
+function ChevronIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`}
+    >
+      <path
+        fillRule="evenodd"
+        d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+        clipRule="evenodd"
+      />
+    </svg>
+  )
+}
+
 function SubjectsPage() {
   const { data, isLoading, isError, error } = useSubjects()
   const [showForm, setShowForm] = useState(false)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
 
   return (
     <div className="space-y-6">
@@ -85,11 +103,26 @@ function SubjectsPage() {
 
       {data && data.length > 0 && (
         <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
-          {data.map((subject) => (
-            <li key={subject.id} className="px-4 py-3 text-sm text-slate-700">
-              {subject.name}
-            </li>
-          ))}
+          {data.map((subject) => {
+            const isOpen = expandedId === subject.id
+            return (
+              <li key={subject.id}>
+                <button
+                  type="button"
+                  onClick={() => setExpandedId(isOpen ? null : subject.id)}
+                  className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  {subject.name}
+                  <ChevronIcon open={isOpen} />
+                </button>
+                {isOpen && (
+                  <div className="border-t border-slate-100 bg-slate-50/50 px-4 py-3">
+                    <SubjectStudentsPanel subjectId={subject.id} />
+                  </div>
+                )}
+              </li>
+            )
+          })}
         </ul>
       )}
     </div>

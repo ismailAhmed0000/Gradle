@@ -76,7 +76,6 @@ func (h *SubmissionHandler) Create(c *fiber.Ctx) error {
 	case err == nil:
 		studentID = &student.ID
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		// no matching roster student — leave studentID nil
 	default:
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up student")
 	}
@@ -152,9 +151,6 @@ func (h *SubmissionHandler) ListForAssignment(c *fiber.Ctx) error {
 	return c.JSON(summaries)
 }
 
-// submissionCounts is shared with StudentHandler, which needs the same
-// per-submission page/answer-region tallies when building a student's work
-// list.
 func submissionCounts(db *gorm.DB, submissionID uuid.UUID) (pageCount, regionsDone, regionsTotal int, err error) {
 	var pages, done, total int64
 	if err = db.Model(&models.SubmissionPage{}).Where("submission_id = ?", submissionID).Count(&pages).Error; err != nil {

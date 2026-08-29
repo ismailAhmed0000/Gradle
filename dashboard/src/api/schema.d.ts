@@ -126,6 +126,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/assignments/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AssignmentId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload a PDF question paper for an assignment */
+        post: operations["uploadAssignmentFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/assignments/{id}/submissions": {
         parameters: {
             query?: never;
@@ -210,11 +229,30 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the logged-in teacher's subjects */
+        /** List subjects — every subject for an admin, the teacher's own otherwise */
         get: operations["listSubjects"];
         put?: never;
         /** Create a subject */
         post: operations["createSubject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/subjects/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["SubjectId"];
+            };
+            cookie?: never;
+        };
+        /** Get a subject and every student enrolled in it. A teacher gets 404 for a subject they don't own, same as if it didn't exist. */
+        get: operations["getSubject"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -231,7 +269,7 @@ export interface paths {
         /** List the logged-in teacher's student roster */
         get: operations["listStudents"];
         put?: never;
-        /** Add a student to the roster */
+        /** Add a student to the roster (admin only) */
         post: operations["createStudent"];
         delete?: never;
         options?: never;
@@ -248,7 +286,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** Get a student's enrolled subjects and work across assignments */
+        /** Get a student's enrolled subjects and work across assignments. A teacher only sees the slice that runs through subjects they own, and gets 404 if the student has no relationship to any of them. */
         get: operations["getStudent"];
         put?: never;
         post?: never;
@@ -269,7 +307,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Enroll a student into a subject */
+        /** Enroll a student into a subject (admin only) */
         post: operations["enrollStudent"];
         delete?: never;
         options?: never;
@@ -311,6 +349,8 @@ export interface components {
             date: string;
             weekday: string;
             pages_scanned: number;
+            pending_submissions: number;
+            pending_to_grade: number;
         };
         DashboardSummary: {
             today_pages_scanned: number;
@@ -319,6 +359,12 @@ export interface components {
             pending_this_week: number;
             submissions_this_week: number;
             pages_scanned_this_week: number;
+            total_students: number;
+            total_subjects: number;
+            /** @description Assignments no student has submitted for yet. */
+            pending_submissions: number;
+            /** @description Assignments with a submission that hasn't been composited (graded) yet. */
+            pending_to_grade: number;
         };
         /** @enum {string} */
         AssignmentStatus: "pending" | "expired" | "submitted" | "graded";
@@ -471,6 +517,9 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        SubjectDetail: components["schemas"]["Subject"] & {
+            students: components["schemas"]["Student"][];
+        };
         CreateSubjectRequest: {
             name: string;
         };
@@ -529,6 +578,7 @@ export interface components {
         AssignmentId: string;
         SubmissionId: string;
         StudentId: string;
+        SubjectId: string;
     };
     requestBodies: never;
     headers: never;
@@ -713,6 +763,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AssignmentDetail"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    uploadAssignmentFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AssignmentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description File stored; page count parsed from the PDF */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentFile"];
                 };
             };
             400: components["responses"]["Error"];
@@ -905,6 +987,31 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
+    getSubject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["SubjectId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Subject detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectDetail"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
     listStudents: {
         parameters: {
             query?: never;
@@ -950,6 +1057,7 @@ export interface operations {
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
             409: components["responses"]["Error"];
         };
     };
@@ -1004,6 +1112,7 @@ export interface operations {
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
             404: components["responses"]["Error"];
         };
     };

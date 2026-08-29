@@ -1,11 +1,18 @@
 package handlers
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
+	"io"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/pdfcpu/pdfcpu/pkg/api"
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"gorm.io/gorm"
 
 	"gradle-go-backend/internal/middleware"
@@ -47,9 +54,6 @@ func (h *AssignmentHandler) List(c *fiber.Ctx) error {
 	return c.JSON(assignments)
 }
 
-// attachComputedFields fills in the fields that don't live in the
-// assignments table itself: the joined subject name, and the status derived
-// from the due date + the most recently created submission.
 func (h *AssignmentHandler) attachComputedFields(a *models.Assignment) error {
 	if a.Subject != nil {
 		a.SubjectName = &a.Subject.Name
@@ -182,6 +186,75 @@ func (h *AssignmentHandler) listQuestions(assignmentID uuid.UUID) ([]models.Ques
 		Order("question_number ASC").
 		Find(&questions).Error
 	return questions, err
+}
+
+func (h *AssignmentHandler) UploadFile(c *fiber.Ctx) error {
+	ownerID, err := middleware.UserIDFromContext(c)
+	if err != nil {
+		return fiber.NewError(fiber.StatusUnauthorized, "invalid token")
+	}
+
+	assignmentID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid assignment id")
+	}
+
+	var assignment models.Assignment
+	if err := h.DB.Select("id").Where("id = ? AND owner_id = ?", assignmentID, ownerID).First(&assignment).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fiber.NewError(fiber.StatusNotFound, "assignment not found")
+		}
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to look up assignment")
+	}
+
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "file is required")
+	}
+	if !strings.EqualFold(filepath.Ext(fileHeader.Filename), ".pdf") {
+		return fiber.NewError(fiber.StatusBadRequest, "file must be a PDF")
+	}
+
+	file, err := fileHeader.Open()
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "failed to read uploaded file")
+	}
+	defer file.Close()
+
+	fileBytes, err := io.ReadAll(file)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "failed to read uploaded file")
+	}
+
+	pageCount, err := api.PageCount(bytes.NewReader(fileBytes), model.NewDefaultConfiguration())
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "file is not a valid PDF")
+	}
+
+	assignmentFile := models.AssignmentFile{
+		ID:           uuid.New(),
+		AssignmentID: assignmentID,
+		PageCount:    pageCount,
+	}
+	assignmentFile.FilePath = fmt.Sprintf("assignments/%s/%s.pdf", assignmentID, assignmentFile.ID)
+
+	if err := h.Storage.PutObject(
+		c.Context(), assignmentFile.FilePath, bytes.NewReader(fileBytes), int64(len(fileBytes)), "application/pdf",
+	); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to store file")
+	}
+
+	if err := h.DB.Create(&assignmentFile).Error; err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to record file")
+	}
+
+	url, err := h.Storage.PresignedGetURL(c.Context(), assignmentFile.FilePath, assignmentFileURLExpiry)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to generate download link")
+	}
+	assignmentFile.DownloadURL = url
+
+	return c.Status(fiber.StatusCreated).JSON(assignmentFile)
 }
 
 func (h *AssignmentHandler) listAssignmentFiles(c *fiber.Ctx, assignmentID uuid.UUID) ([]models.AssignmentFile, error) {
