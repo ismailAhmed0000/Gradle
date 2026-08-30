@@ -2,6 +2,7 @@ import './global.css';
 
 import { useEffect, useState } from 'react';
 import {
+  Alert,
   Linking,
   StatusBar,
   StyleSheet,
@@ -46,7 +47,15 @@ function AppContent() {
   useEffect(() => {
     function handleUrl(url: string) {
       // Avoid relying on the URL global for a custom (non-http) scheme —
-      // just pull the token param out with a regex instead.
+      // just pull params out with a regex instead.
+      const errorMatch = url.match(/[?&]error=([^&]+)/);
+      if (errorMatch) {
+        Alert.alert(
+          'Google sign-in failed',
+          decodeURIComponent(errorMatch[1].replace(/\+/g, ' ')),
+        );
+        return;
+      }
       const match = url.match(/[?&]token=([^&]+)/);
       if (match) {
         loginWithToken(decodeURIComponent(match[1])).catch(() => {});
