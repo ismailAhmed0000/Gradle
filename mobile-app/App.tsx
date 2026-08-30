@@ -40,6 +40,7 @@ function App() {
 function AppContent() {
   const { user, isBootstrapping, loginWithToken } = useAuth();
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [isGoogleSigningIn, setIsGoogleSigningIn] = useState(false);
 
   // Handles the redirect back from the system browser once a student
   // approves Google sign-in (gradleapp://auth-callback?token=...), both for
@@ -58,7 +59,10 @@ function AppContent() {
       }
       const match = url.match(/[?&]token=([^&]+)/);
       if (match) {
-        loginWithToken(decodeURIComponent(match[1])).catch(() => {});
+        setIsGoogleSigningIn(true);
+        loginWithToken(decodeURIComponent(match[1]))
+          .catch(() => {})
+          .finally(() => setIsGoogleSigningIn(false));
       }
     }
 
@@ -72,6 +76,9 @@ function AppContent() {
   }, [loginWithToken]);
 
   if (isBootstrapping) return <SplashScreen />;
+  if (isGoogleSigningIn) {
+    return <SplashScreen message="Signing in with Google…" />;
+  }
   if (!user) {
     return authMode === 'login' ? (
       <LoginScreen onSwitchToRegister={() => setAuthMode('register')} />
